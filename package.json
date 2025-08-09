@@ -9,7 +9,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev --name init",
     "db:studio": "prisma studio",
-    "webhook:update": "tsx scripts/updateWebhook.ts"
+  "webhook:update": "tsx scripts/updateWebhook.ts",
+  "replay": "tsx scripts/replayLogs.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.16.1",

@@ -33,3 +33,14 @@ cloudflared tunnel login
 npm run webhook:update
 
 npm run db:studio
+
+Steps
+
+# 1) Start the dev server
+$env:PORT="8080"; $env:DEBUG_EVENTS="1"; npm run dev
+
+# 2) Start the tunnel (assumes your tunnel maps to http://localhost:8080)
+cloudflared tunnel run helius-tracker
+
+# 3) (Re)register/update the Helius webhook
+npm run webhook:update

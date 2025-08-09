@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import type { ParsedTransfer } from "../types";
 
 // WSOL mint constant used to represent native SOL in a token-like way
@@ -7,7 +8,7 @@ export const WSOL_MINT = "So11111111111111111111111111111111111111112";
 // Minimal schema for Helius enhanced webhook payloads we care about
 const heliusSchema = z.object({
   type: z.string().optional(),
-  signature: z.string(),
+  signature: z.string().optional(),
   timestamp: z.number().or(z.string()).optional(),
   // Enhanced payloads often include tokenTransfers[]
   tokenTransfers: z
@@ -45,7 +46,31 @@ const heliusSchema = z.object({
       })
     )
     .optional(),
+  // Alternate enhanced shapes
+  accountData: z
+    .array(
+      z.object({
+        account: z.string(),
+        nativeBalanceChange: z.number().or(z.string()).optional(),
+        tokenBalanceChanges: z
+          .array(
+            z.object({
+              mint: z.string(),
+              rawTokenAmount: z.object({ tokenAmount: z.string(), decimals: z.number() }),
+              tokenAccount: z.string().optional(),
+              userAccount: z.string().optional(),
+            })
+          )
+          .optional(),
+      })
+    )
+    .optional(),
 });
+
+// Verbose debug toggle for skip logs
+const DEBUG_EVENTS_VERBOSE =
+  process.env.DEBUG_EVENTS_VERBOSE === "1" ||
+  process.env.DEBUG_EVENTS_VERBOSE === "true";
 
 // Convert lamports to SOL string
 function lamportsToSolStr(v: number | string | undefined): string {
@@ -72,10 +97,16 @@ function pickOwnerAddr(t: any, side: "from" | "to"): string | undefined {
     t.fromUserAccount,
     t.fromUserAccountOwner,
     t.fromUser,
+    t.userAccount, // sometimes a generic key is present
+    t.owner,
+    t.ownerAccount,
   ] : [
     t.toUserAccount,
     t.toUserAccountOwner,
     t.toUser,
+    t.userAccount,
+    t.owner,
+    t.ownerAccount,
   ];
   for (const v of a) if (typeof v === "string" && v.length > 0) return v;
   return undefined;
@@ -100,19 +131,20 @@ export function parseHeliusEvent(
     }
     // If the payload nests fields under `events`, lift them
     if (b.events && typeof b.events === "object") {
-      const lifted: any = { ...b.events };
-      // propagate signature/timestamp if present outside
-      if (b.signature) lifted.signature = b.signature;
-      if (b.timestamp || b.blockTime) lifted.timestamp = b.timestamp ?? b.blockTime;
+      // Merge events fields on top of the original object, DO NOT drop top-level fields
+      const merged: any = { ...b, ...b.events };
+      // propagate signature/timestamp when missing
+      if (!merged.signature && b.signature) merged.signature = b.signature;
+      if (!merged.timestamp && (b.timestamp || b.blockTime)) merged.timestamp = b.timestamp ?? b.blockTime;
       // Some shapes use `signatures: string[]`
-      if (!lifted.signature && Array.isArray(b.signatures) && b.signatures[0]) {
-        lifted.signature = b.signatures[0];
+      if (!merged.signature && Array.isArray(b.signatures) && b.signatures[0]) {
+        merged.signature = b.signatures[0];
       }
       // Or `transaction.signatures`
-      if (!lifted.signature && Array.isArray(b.transaction?.signatures) && b.transaction.signatures[0]) {
-        lifted.signature = b.transaction.signatures[0];
+      if (!merged.signature && Array.isArray(b.transaction?.signatures) && b.transaction.signatures[0]) {
+        merged.signature = b.transaction.signatures[0];
       }
-      return lifted;
+      return merged;
     }
     return b;
   };
@@ -124,7 +156,7 @@ export function parseHeliusEvent(
   if (!payload.success) return results;
   const evt = payload.data;
 
-  const signature =
+  let signature =
     evt.signature ??
     // try a few common alternate locations just in case
     (unwrapped as any)?.signatures?.[0] ??
@@ -132,6 +164,14 @@ export function parseHeliusEvent(
     (unwrapped as any)?.hash ??
     (unwrapped as any)?.id ??
     "";
+  if (!signature || signature.length === 0) {
+    try {
+      const h = createHash("sha256").update(JSON.stringify(unwrapped)).digest("hex").slice(0, 32);
+      signature = `hless-${h}`; // hashed, signature-less fallback
+    } catch {
+      signature = `hless-${Date.now()}`;
+    }
+  }
   const ts = evt.timestamp
     ? new Date(Number(evt.timestamp) * (Number(evt.timestamp) > 1e12 ? 1 : 1000))
     : new Date();
@@ -158,7 +198,7 @@ export function parseHeliusEvent(
       const fromTracked = fromAddr && tracked.has(fromAddr);
       const toTracked = toAddr && tracked.has(toAddr);
       if (!fromTracked && !toTracked) {
-        if (process.env.DEBUG_EVENTS === "1" || process.env.DEBUG_EVENTS === "true") {
+        if (DEBUG_EVENTS_VERBOSE) {
           console.log("[debug] skip tokenTransfer: not tracked", {
             fromUserAccount: fromAddr,
             toUserAccount: toAddr,
@@ -191,10 +231,10 @@ export function parseHeliusEvent(
   const fromTracked = fromAddr && tracked.has(fromAddr);
   const toTracked = toAddr && tracked.has(toAddr);
       if (!fromTracked && !toTracked) {
-        if (process.env.DEBUG_EVENTS === "1" || process.env.DEBUG_EVENTS === "true") {
+        if (DEBUG_EVENTS_VERBOSE) {
           console.log("[debug] skip nativeTransfer: not tracked", {
-    fromUserAccount: fromAddr,
-    toUserAccount: toAddr,
+            fromUserAccount: fromAddr,
+            toUserAccount: toAddr,
           });
         }
         continue;
@@ -209,6 +249,52 @@ export function parseHeliusEvent(
         timestamp: ts.toISOString(),
         side,
       });
+    }
+  }
+
+  // accountData shape (alternate enhanced payload)
+  if (evt.accountData && Array.isArray(evt.accountData)) {
+    // Build a quick lookup for token owner movement by mint
+    for (const acc of evt.accountData) {
+      // Token movements
+      if (acc.tokenBalanceChanges) {
+        for (const tbc of acc.tokenBalanceChanges) {
+          const owner = (tbc as any).userAccount as string | undefined;
+          const mint = tbc.mint;
+          const raw = tbc.rawTokenAmount;
+          if (!owner || !mint || !raw) continue;
+          if (!tracked.has(owner)) continue;
+          const amount = toDecimalString(raw.tokenAmount, raw.decimals);
+          // Side: if tokenAmount is positive, owner received; negative => sent
+          const isNeg = raw.tokenAmount.startsWith("-");
+          const side = isNeg ? "SELL" : "BUY";
+          results.push({
+            walletAddress: owner,
+            tokenAddress: mint,
+            amount: amount.startsWith("-") ? amount.slice(1) : amount,
+            signature,
+            timestamp: ts.toISOString(),
+            side,
+          });
+        }
+      }
+      // Native SOL movement via nativeBalanceChange
+      if (acc.nativeBalanceChange !== undefined) {
+        const owner = acc.account;
+        if (!tracked.has(owner)) continue;
+        const lamports = typeof acc.nativeBalanceChange === "string" ? Number(acc.nativeBalanceChange) : acc.nativeBalanceChange;
+        if (!Number.isFinite(lamports) || lamports === 0) continue;
+        const side = lamports < 0 ? "SELL" : "BUY";
+        const amount = lamportsToSolStr(Math.abs(lamports));
+        results.push({
+          walletAddress: owner,
+          tokenAddress: WSOL_MINT,
+          amount,
+          signature,
+          timestamp: ts.toISOString(),
+          side,
+        });
+      }
     }
   }
 
