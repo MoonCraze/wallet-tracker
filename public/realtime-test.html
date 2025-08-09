@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Realtime Test • Helius Tracker</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0f17; --panel: #121826; --muted: #9aa4b2; --text: #e5e7eb;
+      --accent: #60a5fa; --ok: #34d399; --warn: #fbbf24; --err: #f87171;
+      --border: #233044; --chip: #1f2937; --buy: #22c55e; --sell: #ef4444;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,Segoe UI,Roboto,Arial,sans-serif; display:flex; flex-direction:column; gap:12px; padding:16px;}
+    header{display:flex; gap:12px; align-items:center; justify-content:space-between}
+    .title{font-weight:700; letter-spacing:.3px}
+    .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+    .panel{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px}
+    .grid{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+    .mono{font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+    .muted{color:var(--muted)}
+    .chip{background:var(--chip); border:1px solid var(--border); padding:4px 8px; border-radius:999px;}
+    button, input{background:var(--chip); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px;}
+    button{cursor:pointer} button:hover{border-color:var(--accent)}
+    .log{height:320px; overflow:auto; white-space:pre-wrap}
+    .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+    table{width:100%; border-collapse:collapse}
+    th,td{padding:6px 8px; border-bottom:1px solid var(--border)}
+    th{text-align:left; color:var(--muted); font-weight:600}
+    .buy{color:var(--buy); font-weight:700}
+    .sell{color:var(--sell); font-weight:700}
+    .small{font-size:12px}
+  </style>
+  </head>
+  <body>
+    <header>
+      <div class="row">
+        <div class="title">Realtime Test</div>
+        <div class="muted">(SSE only via /stream/all)</div>
+      </div>
+      <div class="row">
+        <button id="connect">Connect (SSE)</button>
+        <button id="refreshCfg" title="Fetch current server config">Refresh Config</button>
+        <button id="saveCfg" title="Save config to server">Save Config</button>
+        <span id="status" class="chip">Idle</span>
+      </div>
+    </header>
+
+    <section class="grid">
+      <div class="panel">
+        <div class="row" style="justify-content:space-between; margin-bottom:6px">
+          <div style="font-weight:600">Transfers</div>
+          <div class="muted small">Event: transfers</div>
+        </div>
+        <div style="overflow:auto; max-height:360px">
+          <table id="t-table">
+            <thead>
+              <tr>
+                <th>Time</th><th>Wallet</th><th>Token</th><th>Amount</th><th>Side</th><th>Sig</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="row" style="justify-content:space-between; margin-bottom:6px">
+          <div style="font-weight:600">Coordinated Trades</div>
+          <div class="muted small">Event: coordinated</div>
+        </div>
+        <div style="overflow:auto; max-height:360px">
+          <table id="c-table">
+            <thead>
+              <tr>
+                <th>Token</th><th>Window</th><th>Triggered</th><th>Unique Wallets</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="display:grid; gap:8px">
+      <div class="row" style="justify-content:space-between; margin-bottom:2px">
+        <div style="font-weight:600">Configuration</div>
+        <div class="muted small">Backed by GET/PATCH /config</div>
+      </div>
+      <div class="row" style="gap:12px; flex-wrap:wrap">
+        <label class="small">Min Amount
+          <input id="cfg-min" type="number" step="0.0001" style="margin-left:6px; width:110px" />
+        </label>
+        <label class="small">Exclude Tokens (comma)
+          <input id="cfg-exclude" type="text" placeholder="So111..., ..." style="margin-left:6px; width:380px" />
+        </label>
+        <label class="small"><input id="cfg-dedup" type="checkbox" /> Dedup by signature only</label>
+        <label class="small">Coord Window (min)
+          <input id="cfg-window" type="number" step="1" min="1" style="margin-left:6px; width:80px" />
+        </label>
+        <label class="small">Coord Min Wallets
+          <input id="cfg-minw" type="number" step="1" min="1" style="margin-left:6px; width:80px" />
+        </label>
+        <label class="small"><input id="cfg-debug" type="checkbox" /> Debug</label>
+        <label class="small"><input id="cfg-debugv" type="checkbox" /> Debug Verbose</label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="row" style="justify-content:space-between; margin-bottom:6px">
+        <div style="font-weight:600">Dev Triggers</div>
+        <div class="muted small">/dev/transfers and /dev/coordinated (if enabled)</div>
+      </div>
+      <div class="row">
+        <button id="emitTransfers">Emit Sample Transfers</button>
+        <button id="emitCoordinated">Emit Sample Coordinated</button>
+        <span class="muted small">If disabled, server returns 404.</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="row" style="justify-content:space-between; margin-bottom:6px">
+        <div style="font-weight:600">Event Log</div>
+        <div class="muted small">Realtime payloads</div>
+      </div>
+      <div id="log" class="log mono"></div>
+    </section>
+
+    <script>
+    (function(){
+      const $ = (sel) => document.querySelector(sel);
+      const btn = $('#connect');
+      const btnRefreshCfg = $('#refreshCfg');
+      const btnSaveCfg = $('#saveCfg');
+      const statusEl = $('#status');
+      const logEl = $('#log');
+      const tBody = $('#t-table tbody');
+      const cBody = $('#c-table tbody');
+      // Config inputs
+      const cfgMin = $('#cfg-min');
+      const cfgExclude = $('#cfg-exclude');
+      const cfgDedup = $('#cfg-dedup');
+      const cfgWindow = $('#cfg-window');
+      const cfgMinW = $('#cfg-minw');
+      const cfgDebug = $('#cfg-debug');
+      const cfgDebugV = $('#cfg-debugv');
+      // Dev triggers
+      const emitTransfers = $('#emitTransfers');
+      const emitCoordinated = $('#emitCoordinated');
+
+      let esAll = null;
+
+      function log(msg, cls){
+        const line = document.createElement('div');
+        if (cls) line.className = cls;
+        line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        logEl.appendChild(line);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function setStatus(text, cls){
+        statusEl.textContent = text;
+        statusEl.className = 'chip ' + (cls||'');
+      }
+
+      function addTransferRow(p){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="small">${new Date(p.timestamp).toLocaleTimeString()}</td>
+          <td class="small mono">${p.walletAddress.slice(0,6)}…${p.walletAddress.slice(-4)}</td>
+          <td class="small mono">${p.tokenAddress.slice(0,6)}…${p.tokenAddress.slice(-4)}</td>
+          <td>${p.amount}</td>
+          <td class="${p.side === 'BUY' ? 'buy' : 'sell'}">${p.side}</td>
+          <td class="small mono">${p.signature.slice(0,8)}…</td>
+        `;
+        tBody.prepend(tr);
+        while (tBody.children.length > 200) tBody.lastChild.remove();
+      }
+
+      function addCoordinatedRow(p){
+        const tr = document.createElement('tr');
+        const windowStr = `${new Date(p.windowStart).toLocaleTimeString()} - ${new Date(p.windowEnd).toLocaleTimeString()}`;
+        tr.innerHTML = `
+          <td class="small mono">${p.tokenAddress.slice(0,6)}…${p.tokenAddress.slice(-4)}</td>
+          <td class="small">${windowStr}</td>
+          <td class="small">${new Date(p.triggeredAt).toLocaleTimeString()}</td>
+          <td>${p.uniqueWalletCount}</td>
+        `;
+        cBody.prepend(tr);
+        while (cBody.children.length > 200) cBody.lastChild.remove();
+      }
+
+      function disconnect(){
+        if (esAll) { try { esAll.close(); } catch {} esAll = null; }
+      }
+
+      function connectSSE(){
+        disconnect();
+        setStatus('Connecting (SSE)…', 'warn');
+        esAll = new EventSource('/stream/all');
+        esAll.onopen = () => setStatus('Connected (SSE)', 'ok');
+        esAll.onerror = () => { setStatus('Error', 'err'); log('SSE error', 'err'); };
+        esAll.addEventListener('transfers', (ev) => {
+          try {
+            const arr = JSON.parse(ev.data);
+            for (const p of arr) addTransferRow(p);
+            log('transfers x' + arr.length);
+          } catch (e) { log('bad json transfers', 'err'); }
+        });
+        esAll.addEventListener('coordinated', (ev) => {
+          try {
+            const p = JSON.parse(ev.data);
+            addCoordinatedRow(p);
+            log('coordinated ' + (p && p.tokenAddress ? p.tokenAddress : ''));
+          } catch (e) { log('bad json coordinated', 'err'); }
+        });
+      }
+
+      // Config helpers
+      function fillConfig(c){
+        try {
+          cfgMin.value = c.minAmount ?? '';
+          cfgExclude.value = (c.excludeTokens || []).join(',');
+          cfgDedup.checked = !!c.dedupBySignatureOnly;
+          cfgWindow.value = c.coordinatedWindowMinutes ?? '';
+          cfgMinW.value = c.coordinatedMinWallets ?? '';
+          cfgDebug.checked = !!c.debugEvents;
+          cfgDebugV.checked = !!c.debugEventsVerbose;
+        } catch {}
+      }
+      async function fetchConfig(){
+        try {
+          const res = await fetch('/config');
+          if (!res.ok) throw new Error('GET /config failed');
+          const c = await res.json();
+          fillConfig(c);
+          log('Loaded config', 'ok');
+        } catch (e){ log('Config load failed', 'err'); }
+      }
+      async function saveConfig(){
+        try {
+          const body = {
+            minAmount: Number(cfgMin.value),
+            excludeTokens: cfgExclude.value.split(',').map(s=>s.trim()).filter(Boolean),
+            dedupBySignatureOnly: !!cfgDedup.checked,
+            coordinatedWindowMinutes: Number(cfgWindow.value),
+            coordinatedMinWallets: Number(cfgMinW.value),
+            debugEvents: !!cfgDebug.checked,
+            debugEventsVerbose: !!cfgDebugV.checked,
+          };
+          const res = await fetch('/config', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          if (!res.ok) throw new Error('PATCH /config failed');
+          const c = await res.json();
+          fillConfig(c);
+          log('Saved config', 'ok');
+        } catch (e){ log('Config save failed', 'err'); }
+      }
+
+      // Dev triggers
+      async function postJson(url, body){
+        try {
+          const res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+          if (!res.ok) throw new Error(String(res.status));
+          const j = await res.json();
+          log('POST ' + url + ' ok ' + JSON.stringify(j), 'ok');
+        } catch (e){ log('POST ' + url + ' failed', 'err'); }
+      }
+
+      // Wire up UI
+      btn.addEventListener('click', connectSSE);
+      btnRefreshCfg.addEventListener('click', fetchConfig);
+      btnSaveCfg.addEventListener('click', saveConfig);
+      emitTransfers.addEventListener('click', ()=> postJson('/dev/transfers', []));
+      emitCoordinated.addEventListener('click', ()=> postJson('/dev/coordinated', {}));
+
+      // Initial actions
+      fetchConfig();
+      connectSSE();
+    })();
+    </script>
+  </body>
+  </html>
