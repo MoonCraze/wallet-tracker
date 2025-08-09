@@ -1,0 +1,21 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model TransferEvent {
+  id            String   @id @default(cuid())
+  walletAddress String
+  tokenAddress  String
+  amount        String   // store as string to avoid FP precision issues
+  signature     String
+  timestamp     DateTime
+  side          String   // "BUY" | "SELL"
+
+  @@unique([walletAddress, tokenAddress, signature], name: "wallet_token_sig_unique")
+  @@index([walletAddress, timestamp])
+}
