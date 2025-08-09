@@ -20,9 +20,12 @@ pnpm webhook:update
 pnpm db:studio
 
 Notes:
-- Webhook verification expects header `x-helius-secret` to equal `WEBHOOK_SECRET`.
+- Webhook verification accepts `x-helius-secret: <secret>` or `Authorization: Bearer <secret>`.
 - On internal errors the webhook now returns HTTP 500 so Helius retries delivery.
 - The webhook update script accepts either `HELIUS_API_KEY` or legacy `HELlUS_API_KEY`.
+
+Troubleshooting:
+- Set `DEBUG_EVENTS=1` when running the server to log why events were skipped (useful to confirm wallet address matches against `fromUserAccount`/`toUserAccount`).
 
 winget install Cloudflare.cloudflared
 cloudflared tunnel login

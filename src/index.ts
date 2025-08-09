@@ -1,15 +1,15 @@
 import "dotenv/config";
-import express from "express";
+import express, { NextFunction, Request, Response } from "express";
 import { readFileSync } from "node:fs";
 import { prisma } from "./db.js";
 import { parseHeliusEvent } from "./utils/parse.js";
 import { verifyHeliusSecret } from "./verify.js";
 
 const app = express();
-app.use(express.json({ limit: "2mb" }));
 
 const PORT = Number(process.env.PORT || 8080);
 const SECRET = process.env.WEBHOOK_SECRET || "super-secret";
+const DEBUG_EVENTS = process.env.DEBUG_EVENTS === "1" || process.env.DEBUG_EVENTS === "true";
 
 // Load wallets.json without using JSON import assertions (compatible with TS/Node ESM)
 const wallets: string[] = JSON.parse(
@@ -20,7 +20,11 @@ const tracked = new Set<string>(wallets);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-app.post("/helius", async (req, res) => {
+// Parse JSON only for the webhook route to avoid parsing unrelated requests
+app.post(
+  "/helius",
+  express.json({ limit: "10mb", type: ["application/json", "application/*+json"] }),
+  async (req, res) => {
   // Verify request
   if (!verifyHeliusSecret(req, SECRET)) {
     return res.status(401).json({ error: "unauthorized" });
@@ -32,7 +36,7 @@ app.post("/helius", async (req, res) => {
 
   try {
     for (const evt of events) {
-      const parsed = parseHeliusEvent(evt, tracked);
+  const parsed = parseHeliusEvent(evt, tracked);
       if (parsed.length === 0) continue;
 
       for (const p of parsed) {
@@ -57,6 +61,10 @@ app.post("/helius", async (req, res) => {
       }
     }
 
+    if (DEBUG_EVENTS && (!events || events.length === 0)) {
+      console.log("[debug] webhook received empty events array");
+    }
+
   // Ack quickly on success
   res.status(200).json({ ok: true });
   } catch (e) {
@@ -64,6 +72,29 @@ app.post("/helius", async (req, res) => {
   // Return 500 so Helius will retry delivery
   res.status(500).json({ ok: false });
   }
+  }
+);
+
+// Gracefully handle body parsing errors and aborted requests
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use(function bodyParseErrorHandler(
+  err: any,
+  _req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  if (!err) return next();
+  const msg = (err && (err.message || "")).toLowerCase();
+  const type = (err && (err.type || "")).toLowerCase();
+  if (
+    msg.includes("request aborted") ||
+    type.includes("aborted") ||
+    type.includes("entity.too.large") ||
+    err instanceof SyntaxError
+  ) {
+    return res.status(400).json({ error: "invalid request body" });
+  }
+  return next(err);
 });
 
 app.listen(PORT, () => {

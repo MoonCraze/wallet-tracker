@@ -26,8 +26,8 @@ async function main() {
       webhookURL: WEBHOOK_URL,
       transactionTypes: ["ANY"],
       accountAddresses: wallets,
-      webhookType: "enhanced", // or "raw" if you prefer lower-latency raw payloads
-      authHeader: `X-Helius-Secret: ${WEBHOOK_SECRET}`,
+  webhookType: "enhanced", // or "raw" if you prefer lower-latency raw payloads
+  authHeader: `Authorization: Bearer ${WEBHOOK_SECRET}`,
     });
     console.log("Updated webhook:", data.id || data);
   } else {
@@ -36,8 +36,8 @@ async function main() {
       webhookURL: WEBHOOK_URL,
       transactionTypes: ["ANY"],
       accountAddresses: wallets,
-      webhookType: "enhanced",
-      authHeader: `X-Helius-Secret: ${WEBHOOK_SECRET}`,
+  webhookType: "enhanced",
+  authHeader: `Authorization: Bearer ${WEBHOOK_SECRET}`,
     });
     console.log("Created webhook:", data.id || data);
   }
