@@ -104,6 +104,7 @@ export function publishTransfers(rows: TransferBroadcast[]) {
     if (markSeen(seenTransfers, key)) unique.push(r);
   }
   if (unique.length === 0) return;
+  // Note: we also keep a client-side dedupe in the demo HTML to avoid re-render on reconnects
   const data = JSON.stringify(unique);
   // Dedicated stream
   for (const res of Array.from(transfersClients)) {

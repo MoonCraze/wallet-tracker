@@ -1,41 +1,96 @@
 import "dotenv/config";
 import express from "express";
+import { createServer } from "node:http";
 import { readFileSync, mkdirSync, appendFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { prisma } from "./db.js";
-import { parseHeliusEvent, WSOL_MINT } from "./utils/parse.js";
+import { initRealtime, publishCoordinated, publishTransfers } from "./realtime.js";
+import { getConfig, setConfig, configToJSON } from "./config.js";
+import { parseHeliusEvent } from "./utils/parse.js";
 import { verifyHeliusSecret } from "./verify.js";
 const app = express();
+// Serve static files (e.g., test page) from ./public
+app.use(express.static("public"));
+// Create HTTP server and initialize realtime (SSE + WS)
+const server = createServer(app);
+initRealtime(app, server);
 const PORT = Number(process.env.PORT || 8080);
 const SECRET = process.env.WEBHOOK_SECRET || "super-secret";
-const DEBUG_EVENTS = process.env.DEBUG_EVENTS === "1" || process.env.DEBUG_EVENTS === "true";
-const DEBUG_EVENTS_VERBOSE = process.env.DEBUG_EVENTS_VERBOSE === "1" || process.env.DEBUG_EVENTS_VERBOSE === "true";
+// Convenience getters for dynamic config
+const DEBUG_EVENTS = () => getConfig().debugEvents;
+const DEBUG_EVENTS_VERBOSE = () => getConfig().debugEventsVerbose;
+const MIN_AMOUNT = () => getConfig().minAmount;
+const EXCLUDE_TOKENS = () => getConfig().excludeTokensSet;
+const DEDUP_BY_SIGNATURE_ONLY = () => getConfig().dedupBySignatureOnly;
+const COORDINATED_WINDOW_MINUTES = () => getConfig().coordinatedWindowMinutes;
+const COORDINATED_MIN_WALLETS = () => getConfig().coordinatedMinWallets;
+const WINDOW_MS = () => Math.max(1, COORDINATED_WINDOW_MINUTES()) * 60_000;
+const ALLOW_DEV_ENDPOINTS = process.env.ALLOW_DEV_ENDPOINTS === "1" || process.env.ALLOW_DEV_ENDPOINTS === "true";
 // Load wallets.json without using JSON import assertions (compatible with TS/Node ESM)
 const wallets = JSON.parse(readFileSync(new URL("./wallets.json", import.meta.url), "utf-8"));
 // Build a Set for quick membership checks
 const tracked = new Set(wallets);
-// Config: token exclusion and minimum amount threshold (default: exclude SOL and < 1)
-const EXCLUDE_TOKENS = new Set((process.env.EXCLUDE_TOKENS || WSOL_MINT)
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean));
-const MIN_AMOUNT = (() => {
-    const v = parseFloat(process.env.MIN_AMOUNT || "1");
-    return Number.isFinite(v) ? v : 1;
-})();
-// Optional coarser dedup mode: treat signature as unique regardless of token/wallet
-const DEDUP_BY_SIGNATURE_ONLY = process.env.DEDUP_BY_SIGNATURE_ONLY === "1" || process.env.DEDUP_BY_SIGNATURE_ONLY === "true";
-// Coordinated trading detection config
-const COORDINATED_WINDOW_MINUTES = Number(process.env.COORDINATED_WINDOW_MINUTES || 5);
-const COORDINATED_MIN_WALLETS = Number(process.env.COORDINATED_MIN_WALLETS || 5);
-const WINDOW_MS = Math.max(1, COORDINATED_WINDOW_MINUTES) * 60_000;
 function floorToWindowStart(d) {
     const t = d.getTime();
-    return new Date(Math.floor(t / WINDOW_MS) * WINDOW_MS);
+    const w = WINDOW_MS();
+    return new Date(Math.floor(t / w) * w);
 }
 app.get("/health", (_req, res) => res.json({ ok: true }));
+// Config endpoints: GET current config, PATCH to update at runtime
+app.get("/config", (_req, res) => {
+    res.json(configToJSON(getConfig()));
+});
+app.patch("/config", express.json(), (req, res) => {
+    try {
+        const updated = setConfig(req.body || {});
+        res.json(configToJSON(updated));
+    }
+    catch (e) {
+        res.status(400).json({ error: e?.message || "invalid config" });
+    }
+});
+// Optional dev endpoints to manually emit realtime messages (disabled by default)
+if (ALLOW_DEV_ENDPOINTS) {
+    app.get("/dev/ping", (_req, res) => res.json({ ok: true, now: new Date().toISOString() }));
+    app.post("/dev/transfers", express.json(), (req, res) => {
+        const now = new Date();
+        const sample = [
+            {
+                walletAddress: "DevWal1et1111111111111111111111111111111",
+                tokenAddress: "DevToken11111111111111111111111111111111",
+                amount: "1.23",
+                signature: "DEVSIG-" + Math.random().toString(16).slice(2, 10),
+                timestamp: now.toISOString(),
+                side: (Math.random() > 0.5 ? "BUY" : "SELL"),
+            },
+        ];
+        try {
+            publishTransfers(Array.isArray(req.body) && req.body.length ? req.body : sample);
+        }
+        catch { }
+        res.json({ ok: true, sent: (Array.isArray(req.body) && req.body.length ? req.body.length : sample.length) });
+    });
+    app.post("/dev/coordinated", express.json(), (req, res) => {
+        const now = new Date();
+        const win = 5 * 60_000;
+        const start = new Date(now.getTime() - win);
+        const sample = {
+            tokenAddress: "DevTokenCoord11111111111111111111111111111",
+            windowStart: start.toISOString(),
+            windowEnd: now.toISOString(),
+            triggeredAt: now.toISOString(),
+            uniqueWalletCount: 7,
+            walletAddresses: Array.from({ length: 7 }, (_, i) => `DevWal${i.toString().padStart(2, '0')}et111111111111111111111111`),
+        };
+        try {
+            publishCoordinated((req.body && Object.keys(req.body).length) ? req.body : sample);
+        }
+        catch { }
+        res.json({ ok: true });
+    });
+}
 // Surface DB path and CWD up front to catch env/path mismatches
-if (DEBUG_EVENTS) {
+if (DEBUG_EVENTS()) {
     console.log("[boot] cwd:", process.cwd());
     console.log("[boot] DATABASE_URL:", process.env.DATABASE_URL || "(not set)");
 }
@@ -46,13 +101,13 @@ app.post("/helius", express.json({ limit: "10mb", type: ["application/json", "ap
     const hdr = req.headers || {};
     const authHdr = typeof hdr["authorization"] === "string" ? hdr["authorization"] : undefined;
     const redactedAuth = authHdr ? `${authHdr.split(" ")[0]} ******` : undefined;
-    if (DEBUG_EVENTS) {
+    if (DEBUG_EVENTS()) {
         console.log(`[webhook] ${recvAt} request received`);
     }
     // Verify request
     const authorized = verifyHeliusSecret(req, SECRET);
     if (!authorized) {
-        if (DEBUG_EVENTS) {
+        if (DEBUG_EVENTS()) {
             console.warn("[webhook] unauthorized request", {
                 hasXHeliusSecret: typeof hdr["x-helius-secret"] === "string",
                 authorization: redactedAuth,
@@ -71,7 +126,7 @@ app.post("/helius", express.json({ limit: "10mb", type: ["application/json", "ap
     const body = req.body;
     const events = Array.isArray(body) ? body : [body];
     // Persist raw webhook payload for offline debugging (ndjson per event)
-    if (DEBUG_EVENTS) {
+    if (DEBUG_EVENTS()) {
         try {
             const logDir = joinPath(process.cwd(), "logs");
             mkdirSync(logDir, { recursive: true });
@@ -95,168 +150,177 @@ app.post("/helius", express.json({ limit: "10mb", type: ["application/json", "ap
         }
     }
     try {
-        // Collect tokens that had BUY events in this batch to check coordination per token over last window
+        // Collect tokens touched by BUYs to re-check coordination after inserts
         const touchedTokens = new Set();
         for (const evt of events) {
-            if (DEBUG_EVENTS) {
+            if (DEBUG_EVENTS()) {
                 const keys = evt && typeof evt === "object" ? Object.keys(evt) : [];
                 console.log("[webhook] event keys:", keys.slice(0, 20));
             }
             const parsed = parseHeliusEvent(evt, tracked);
-            // Apply filters: exclude common tokens and small amounts
             const filtered = parsed.filter((p) => {
-                if (EXCLUDE_TOKENS.has(p.tokenAddress)) {
-                    if (DEBUG_EVENTS_VERBOSE) {
+                if (EXCLUDE_TOKENS().has(p.tokenAddress)) {
+                    if (DEBUG_EVENTS_VERBOSE())
                         console.log("[filter] exclude token", { tokenAddress: p.tokenAddress, signature: p.signature });
-                    }
                     return false;
                 }
                 const amt = Math.abs(Number(p.amount));
-                if (!Number.isFinite(amt) || amt < MIN_AMOUNT) {
-                    if (DEBUG_EVENTS_VERBOSE) {
-                        console.log("[filter] below min amount", { amount: p.amount, min: MIN_AMOUNT, signature: p.signature });
-                    }
+                if (!Number.isFinite(amt) || amt < MIN_AMOUNT()) {
+                    if (DEBUG_EVENTS_VERBOSE())
+                        console.log("[filter] below min amount", { amount: p.amount, min: MIN_AMOUNT(), signature: p.signature });
                     return false;
                 }
                 return true;
             });
-            if (DEBUG_EVENTS) {
-                console.log(`[webhook] parsed transfers: ${parsed.length}`);
-                if (parsed.length > 0) {
-                    const peek = filtered.slice(0, 2).map(p => ({
-                        walletAddress: p.walletAddress,
-                        tokenAddress: p.tokenAddress,
-                        amount: p.amount,
-                        side: p.side,
-                        signature: p.signature,
-                    }));
-                    console.log("[webhook] parsed sample:", peek);
-                    const dropped = parsed.length - filtered.length;
-                    if (dropped > 0)
-                        console.log(`[webhook] filtered out: ${dropped}`);
-                }
+            if (DEBUG_EVENTS() && parsed.length > 0) {
+                const peek = filtered.slice(0, 2).map(p => ({ walletAddress: p.walletAddress, tokenAddress: p.tokenAddress, amount: p.amount, side: p.side, signature: p.signature }));
+                console.log("[webhook] parsed sample:", peek);
+                const dropped = parsed.length - filtered.length;
+                if (dropped > 0)
+                    console.log(`[webhook] filtered out: ${dropped}`);
             }
             if (filtered.length === 0)
                 continue;
-            // Deduplicate within this payload by (walletAddress, tokenAddress, signature)
-            const unique = new Map();
+            // Deduplicate within this payload
+            const uniqMap = new Map();
             for (const p of filtered) {
-                const key = DEDUP_BY_SIGNATURE_ONLY
-                    ? p.signature
-                    : `${p.walletAddress}|${p.tokenAddress}|${p.signature}`;
-                if (!unique.has(key))
-                    unique.set(key, p);
+                const key = DEDUP_BY_SIGNATURE_ONLY() ? p.signature : `${p.walletAddress}|${p.tokenAddress}|${p.signature}`;
+                if (!uniqMap.has(key))
+                    uniqMap.set(key, p);
             }
-            const toWrite = Array.from(unique.values());
-            // Upsert with compound unique key to avoid exceptions on duplicates
-            const ops = toWrite.map((p) => prisma.transferEvent.upsert({
-                where: {
-                    wallet_token_sig_unique: {
-                        walletAddress: p.walletAddress,
-                        tokenAddress: p.tokenAddress,
-                        signature: p.signature,
-                    },
-                },
-                update: {},
-                create: {
+            const toWrite = Array.from(uniqMap.values());
+            // Check existing keys in DB to avoid duplicate inserts & broadcasts
+            let existingKeys = new Set();
+            try {
+                if (toWrite.length > 0) {
+                    if (DEDUP_BY_SIGNATURE_ONLY()) {
+                        const sigs = Array.from(new Set(toWrite.map(p => p.signature)));
+                        const rows = await prisma.transferEvent.findMany({ where: { signature: { in: sigs } }, select: { signature: true } });
+                        existingKeys = new Set(rows.map(r => r.signature));
+                    }
+                    else {
+                        // Optimize by querying only by signature and filtering client-side
+                        const sigs = Array.from(new Set(toWrite.map(p => p.signature)));
+                        const rows = await prisma.transferEvent.findMany({
+                            where: { signature: { in: sigs } },
+                            select: { walletAddress: true, tokenAddress: true, signature: true },
+                        });
+                        existingKeys = new Set(rows.map(r => `${r.walletAddress}|${r.tokenAddress}|${r.signature}`));
+                    }
+                }
+            }
+            catch (e) {
+                if (DEBUG_EVENTS())
+                    console.warn("[db] existing keys check failed", e);
+            }
+            const newRows = toWrite.filter(p => {
+                const k = DEDUP_BY_SIGNATURE_ONLY() ? p.signature : `${p.walletAddress}|${p.tokenAddress}|${p.signature}`;
+                return !existingKeys.has(k);
+            });
+            let created = 0;
+            if (newRows.length > 0) {
+                try {
+                    const resCM = await prisma.transferEvent.createMany({
+                        data: newRows.map(p => ({
+                            walletAddress: p.walletAddress,
+                            tokenAddress: p.tokenAddress,
+                            amount: p.amount,
+                            signature: p.signature,
+                            timestamp: new Date(p.timestamp),
+                            side: p.side,
+                        })),
+                    });
+                    created = resCM?.count ?? newRows.length;
+                }
+                catch (e) {
+                    // Fallback to upsert if createMany is unsupported
+                    for (const p of newRows) {
+                        try {
+                            await prisma.transferEvent.upsert({
+                                where: { wallet_token_sig_unique: { walletAddress: p.walletAddress, tokenAddress: p.tokenAddress, signature: p.signature } },
+                                update: {},
+                                create: { walletAddress: p.walletAddress, tokenAddress: p.tokenAddress, amount: p.amount, signature: p.signature, timestamp: new Date(p.timestamp), side: p.side },
+                            });
+                            created++;
+                        }
+                        catch { }
+                    }
+                }
+            }
+            if (DEBUG_EVENTS())
+                console.log(`[webhook] inserted: ${created}/${toWrite.length} (skipped existing: ${toWrite.length - created})`);
+            // Broadcast only newly created rows
+            if (newRows.length > 0) {
+                const broadcastRows = newRows.map(p => ({
                     walletAddress: p.walletAddress,
                     tokenAddress: p.tokenAddress,
                     amount: p.amount,
                     signature: p.signature,
-                    timestamp: new Date(p.timestamp),
+                    timestamp: new Date(p.timestamp).toISOString(),
                     side: p.side,
-                },
-            }));
-            let wrote = 0;
-            try {
-                const res = await prisma.$transaction(ops);
-                wrote = res.length; // all succeeded; upsert returns existing or created
-            }
-            catch (e) {
-                // Fall back to sequential to surface any unexpected issues without aborting all
-                wrote = 0;
-                for (const op of ops) {
-                    try {
-                        await op;
-                        wrote++;
-                    }
-                    catch (err) {
-                        if (DEBUG_EVENTS_VERBOSE)
-                            console.warn("[db] upsert failed for one row", err);
-                    }
-                }
-            }
-            if (DEBUG_EVENTS)
-                console.log(`[webhook] upserts succeeded: ${wrote}/${toWrite.length}`);
-            // Record token for BUY side only to check coordination
-            for (const p of toWrite) {
-                if (p.side === "BUY")
-                    touchedTokens.add(p.tokenAddress);
-            }
-        }
-        if (DEBUG_EVENTS && (!events || events.length === 0)) {
-            console.log("[webhook] received empty events array");
-        }
-        // After processing all events, check coordinated buys per token over the last window [now-W, now)
-        const now = new Date();
-        const start = new Date(now.getTime() - WINDOW_MS);
-        const windowStart = floorToWindowStart(now);
-        const windowEnd = new Date(windowStart.getTime() + WINDOW_MS);
-        for (const tokenAddress of touchedTokens) {
-            const rows = await prisma.transferEvent.findMany({
-                where: { tokenAddress, side: "BUY", timestamp: { gte: start, lt: now } },
-                select: { walletAddress: true },
-            });
-            const uniq = Array.from(new Set(rows.map(r => r.walletAddress))).sort();
-            if (uniq.length >= COORDINATED_MIN_WALLETS) {
+                }));
                 try {
-                    const existing = await prisma.coordinatedTrade.findFirst({
-                        where: { tokenAddress, windowStart },
-                        select: { id: true },
-                    });
-                    if (existing) {
-                        await prisma.coordinatedTrade.update({
-                            where: { id: existing.id },
-                            data: {
-                                uniqueWalletCount: uniq.length,
-                                walletAddresses: JSON.stringify(uniq),
-                                windowEnd,
-                                triggeredAt: now,
-                            },
-                        });
-                    }
-                    else {
-                        await prisma.coordinatedTrade.create({
-                            data: {
-                                tokenAddress,
-                                windowStart,
-                                windowEnd,
-                                triggeredAt: now,
-                                uniqueWalletCount: uniq.length,
-                                walletAddresses: JSON.stringify(uniq),
-                            },
-                        });
-                    }
-                    if (DEBUG_EVENTS) {
-                        console.log("[coord] detected coordinated BUY:", {
-                            token: tokenAddress,
-                            windowStart: windowStart.toISOString(),
-                            count: uniq.length,
-                        });
-                    }
+                    publishTransfers(broadcastRows);
                 }
                 catch (e) {
-                    if (DEBUG_EVENTS)
+                    if (DEBUG_EVENTS())
+                        console.warn("[sse] transfer broadcast failed", e);
+                }
+            }
+            for (const p of newRows)
+                if (p.side === "BUY")
+                    touchedTokens.add(p.tokenAddress);
+        }
+        if (DEBUG_EVENTS() && (!events || events.length === 0)) {
+            console.log("[webhook] received empty events array");
+        }
+        // Check coordinated buys per touched token
+        const now = new Date();
+        const start = new Date(now.getTime() - WINDOW_MS());
+        const windowStart = floorToWindowStart(now);
+        const windowEnd = new Date(windowStart.getTime() + WINDOW_MS());
+        for (const tokenAddress of touchedTokens) {
+            const rows = await prisma.transferEvent.findMany({ where: { tokenAddress, side: "BUY", timestamp: { gte: start, lt: now } }, select: { walletAddress: true } });
+            const uniq = Array.from(new Set(rows.map(r => r.walletAddress))).sort();
+            if (uniq.length >= COORDINATED_MIN_WALLETS()) {
+                try {
+                    const existing = await prisma.coordinatedTrade.findFirst({ where: { tokenAddress, windowStart }, select: { id: true } });
+                    if (existing) {
+                        const updated = await prisma.coordinatedTrade.update({
+                            where: { id: existing.id },
+                            data: { uniqueWalletCount: uniq.length, walletAddresses: JSON.stringify(uniq), windowEnd, triggeredAt: now },
+                        });
+                        try {
+                            publishCoordinated({ tokenAddress, windowStart: windowStart.toISOString(), windowEnd: windowEnd.toISOString(), triggeredAt: now.toISOString(), uniqueWalletCount: updated.uniqueWalletCount, walletAddresses: JSON.parse(updated.walletAddresses || "[]") });
+                        }
+                        catch (e) {
+                            if (DEBUG_EVENTS())
+                                console.warn("[sse] coordinated broadcast failed", e);
+                        }
+                    }
+                    else {
+                        const created = await prisma.coordinatedTrade.create({ data: { tokenAddress, windowStart, windowEnd, triggeredAt: now, uniqueWalletCount: uniq.length, walletAddresses: JSON.stringify(uniq) } });
+                        try {
+                            publishCoordinated({ tokenAddress, windowStart: windowStart.toISOString(), windowEnd: windowEnd.toISOString(), triggeredAt: now.toISOString(), uniqueWalletCount: created.uniqueWalletCount, walletAddresses: JSON.parse(created.walletAddresses || "[]") });
+                        }
+                        catch (e) {
+                            if (DEBUG_EVENTS())
+                                console.warn("[sse] coordinated broadcast failed", e);
+                        }
+                    }
+                    if (DEBUG_EVENTS())
+                        console.log("[coord] detected coordinated BUY:", { token: tokenAddress, windowStart: windowStart.toISOString(), count: uniq.length });
+                }
+                catch (e) {
+                    if (DEBUG_EVENTS())
                         console.warn("[coord] upsert failed", e);
                 }
             }
         }
-        // Ack quickly on success
         res.status(200).json({ ok: true });
     }
     catch (e) {
         console.error("Error handling webhook:", e);
-        // Return 500 so Helius will retry delivery
         res.status(500).json({ ok: false });
     }
 });
@@ -275,25 +339,24 @@ app.use(function bodyParseErrorHandler(err, _req, res, next) {
     }
     return next(err);
 });
-app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`Server listening on :${PORT}`);
     console.log("[config]", {
         DATABASE_URL: process.env.DATABASE_URL,
         PORT,
-        EXCLUDE_TOKENS: Array.from(EXCLUDE_TOKENS),
-        MIN_AMOUNT,
-        DEDUP_BY_SIGNATURE_ONLY,
-        COORDINATED_WINDOW_MINUTES,
-        COORDINATED_MIN_WALLETS,
-        DEBUG_EVENTS,
-        DEBUG_EVENTS_VERBOSE,
+        EXCLUDE_TOKENS: Array.from(EXCLUDE_TOKENS()),
+        MIN_AMOUNT: MIN_AMOUNT(),
+        DEDUP_BY_SIGNATURE_ONLY: DEDUP_BY_SIGNATURE_ONLY(),
+        COORDINATED_WINDOW_MINUTES: COORDINATED_WINDOW_MINUTES(),
+        COORDINATED_MIN_WALLETS: COORDINATED_MIN_WALLETS(),
+        DEBUG_EVENTS: DEBUG_EVENTS(),
+        DEBUG_EVENTS_VERBOSE: DEBUG_EVENTS_VERBOSE(),
     });
-    // Background scanner: periodically scan the last window for coordinated buys
-    const intervalMs = Math.min(60_000, Math.max(10_000, Math.floor(WINDOW_MS / 2)));
+    // Background scanner: periodically scan the last window for coordinated buys (adapts to config)
     const scan = async () => {
         try {
             const now = new Date();
-            const start = new Date(now.getTime() - WINDOW_MS);
+            const start = new Date(now.getTime() - WINDOW_MS());
             const end = now;
             // Find tokens with BUYs in the window
             const tokenRows = await prisma.transferEvent.findMany({
@@ -309,15 +372,15 @@ app.listen(PORT, () => {
                     distinct: ["walletAddress"],
                 });
                 const uniq = buyers.map(b => b.walletAddress);
-                if (uniq.length >= COORDINATED_MIN_WALLETS) {
+                if (uniq.length >= COORDINATED_MIN_WALLETS()) {
                     const windowStart = floorToWindowStart(start);
-                    const windowEnd = new Date(windowStart.getTime() + WINDOW_MS);
+                    const windowEnd = new Date(windowStart.getTime() + WINDOW_MS());
                     const existing = await prisma.coordinatedTrade.findFirst({
                         where: { tokenAddress: token, windowStart },
                         select: { id: true },
                     });
                     if (existing) {
-                        await prisma.coordinatedTrade.update({
+                        const updated = await prisma.coordinatedTrade.update({
                             where: { id: existing.id },
                             data: {
                                 uniqueWalletCount: uniq.length,
@@ -326,9 +389,23 @@ app.listen(PORT, () => {
                                 triggeredAt: now,
                             },
                         });
+                        try {
+                            publishCoordinated({
+                                tokenAddress: token,
+                                windowStart: windowStart.toISOString(),
+                                windowEnd: windowEnd.toISOString(),
+                                triggeredAt: now.toISOString(),
+                                uniqueWalletCount: updated.uniqueWalletCount,
+                                walletAddresses: JSON.parse(updated.walletAddresses || "[]"),
+                            });
+                        }
+                        catch (e) {
+                            if (DEBUG_EVENTS())
+                                console.warn("[sse] coordinated broadcast failed", e);
+                        }
                     }
                     else {
-                        await prisma.coordinatedTrade.create({
+                        const created = await prisma.coordinatedTrade.create({
                             data: {
                                 tokenAddress: token,
                                 windowStart,
@@ -338,8 +415,22 @@ app.listen(PORT, () => {
                                 walletAddresses: JSON.stringify(uniq),
                             },
                         });
+                        try {
+                            publishCoordinated({
+                                tokenAddress: token,
+                                windowStart: windowStart.toISOString(),
+                                windowEnd: windowEnd.toISOString(),
+                                triggeredAt: now.toISOString(),
+                                uniqueWalletCount: created.uniqueWalletCount,
+                                walletAddresses: JSON.parse(created.walletAddresses || "[]"),
+                            });
+                        }
+                        catch (e) {
+                            if (DEBUG_EVENTS())
+                                console.warn("[sse] coordinated broadcast failed", e);
+                        }
                     }
-                    if (DEBUG_EVENTS) {
+                    if (DEBUG_EVENTS()) {
                         console.log("[coord/bg] coordinated BUY:", {
                             token,
                             windowStart: windowStart.toISOString(),
@@ -350,11 +441,13 @@ app.listen(PORT, () => {
             }
         }
         catch (e) {
-            if (DEBUG_EVENTS)
+            if (DEBUG_EVENTS())
                 console.warn("[coord/bg] scan failed", e);
         }
+        // schedule next run based on current window config
+        const intervalMs = Math.min(60_000, Math.max(10_000, Math.floor(WINDOW_MS() / 2)));
+        setTimeout(scan, intervalMs);
     };
-    // Run soon after start then on interval
+    // Kick off first scan
     scan();
-    setInterval(scan, intervalMs);
 });

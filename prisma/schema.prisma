@@ -19,6 +19,7 @@ model TransferEvent {
   @@unique([walletAddress, tokenAddress, signature], name: "wallet_token_sig_unique")
   @@index([walletAddress, timestamp])
   @@index([tokenAddress, timestamp])
+  @@index([signature])
 }
 
 // Stores coordinated trading detection events over a rolling 5-minute bucket

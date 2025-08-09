@@ -150,6 +150,8 @@
       const emitCoordinated = $('#emitCoordinated');
 
       let esAll = null;
+  const seenTransfers = new Set();
+  const MAX_SEEN = 5000;
 
       function log(msg, cls){
         const line = document.createElement('div');
@@ -204,8 +206,24 @@
         esAll.addEventListener('transfers', (ev) => {
           try {
             const arr = JSON.parse(ev.data);
-            for (const p of arr) addTransferRow(p);
-            log('transfers x' + arr.length);
+            let added = 0;
+            for (const p of arr) {
+              const key = `${p.walletAddress}|${p.tokenAddress}|${p.signature}`;
+              if (seenTransfers.has(key)) continue;
+              seenTransfers.add(key);
+              addTransferRow(p);
+              added++;
+            }
+            if (seenTransfers.size > MAX_SEEN) {
+              // naive trim: clear and keep only the latest keys from table rows
+              const fresh = new Set();
+              const rows = Array.from(tBody.querySelectorAll('tr')).slice(0, 1000);
+              for (const tr of rows) {
+                // unable to reconstruct key reliably here; simple reset
+              }
+              seenTransfers.clear();
+            }
+            log('transfers +' + added + ' (in ' + arr.length + ')');
           } catch (e) { log('bad json transfers', 'err'); }
         });
         esAll.addEventListener('coordinated', (ev) => {

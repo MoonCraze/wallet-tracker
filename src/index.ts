@@ -204,8 +204,10 @@ app.post(
             const rows = await prisma.transferEvent.findMany({ where: { signature: { in: sigs } }, select: { signature: true } });
             existingKeys = new Set(rows.map(r => r.signature));
           } else {
+            // Optimize by querying only by signature and filtering client-side
+            const sigs = Array.from(new Set(toWrite.map(p => p.signature)));
             const rows = await prisma.transferEvent.findMany({
-              where: { OR: toWrite.map(p => ({ walletAddress: p.walletAddress, tokenAddress: p.tokenAddress, signature: p.signature })) },
+              where: { signature: { in: sigs } },
               select: { walletAddress: true, tokenAddress: true, signature: true },
             });
             existingKeys = new Set(rows.map(r => `${r.walletAddress}|${r.tokenAddress}|${r.signature}`));
@@ -220,8 +222,8 @@ app.post(
         return !existingKeys.has(k);
       });
 
-      let created = 0;
-      if (newRows.length > 0) {
+  let created = 0;
+  if (newRows.length > 0) {
         try {
           const resCM = await prisma.transferEvent.createMany({
             data: newRows.map(p => ({
@@ -231,7 +233,7 @@ app.post(
               signature: p.signature,
               timestamp: new Date(p.timestamp),
               side: p.side,
-            })),
+    })),
           });
           created = (resCM as any)?.count ?? newRows.length;
         } catch (e) {
