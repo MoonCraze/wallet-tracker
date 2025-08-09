@@ -18,4 +18,19 @@ model TransferEvent {
 
   @@unique([walletAddress, tokenAddress, signature], name: "wallet_token_sig_unique")
   @@index([walletAddress, timestamp])
+  @@index([tokenAddress, timestamp])
+}
+
+// Stores coordinated trading detection events over a rolling 5-minute bucket
+model CoordinatedTrade {
+  id                String   @id @default(cuid())
+  tokenAddress      String
+  windowStart       DateTime // inclusive bucket start
+  windowEnd         DateTime // exclusive bucket end
+  triggeredAt       DateTime // when we detected/recorded it
+  uniqueWalletCount Int
+  walletAddresses   String   // JSON array of wallet addresses that bought within window
+
+  @@index([tokenAddress, windowStart])
+  @@unique([tokenAddress, windowStart], name: "token_window_unique")
 }

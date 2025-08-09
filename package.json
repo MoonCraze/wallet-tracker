@@ -10,7 +10,10 @@
     "db:migrate": "prisma migrate dev --name init",
     "db:studio": "prisma studio",
   "webhook:update": "tsx scripts/updateWebhook.ts",
-  "replay": "tsx scripts/replayLogs.ts"
+  "replay": "tsx scripts/replayLogs.ts",
+  "coord:seed": "tsx scripts/coordInsertSample.ts",
+  "coord:scan": "tsx scripts/coordScan.ts",
+  "coord:list": "tsx scripts/coordList.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.16.1",

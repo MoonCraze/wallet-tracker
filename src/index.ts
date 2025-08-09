@@ -34,6 +34,16 @@ const MIN_AMOUNT: number = (() => {
 // Optional coarser dedup mode: treat signature as unique regardless of token/wallet
 const DEDUP_BY_SIGNATURE_ONLY = process.env.DEDUP_BY_SIGNATURE_ONLY === "1" || process.env.DEDUP_BY_SIGNATURE_ONLY === "true";
 
+// Coordinated trading detection config
+const COORDINATED_WINDOW_MINUTES = Number(process.env.COORDINATED_WINDOW_MINUTES || 5);
+const COORDINATED_MIN_WALLETS = Number(process.env.COORDINATED_MIN_WALLETS || 5);
+const WINDOW_MS = Math.max(1, COORDINATED_WINDOW_MINUTES) * 60_000;
+
+function floorToWindowStart(d: Date): Date {
+  const t = d.getTime();
+  return new Date(Math.floor(t / WINDOW_MS) * WINDOW_MS);
+}
+
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 // Surface DB path and CWD up front to catch env/path mismatches
@@ -103,6 +113,8 @@ app.post(
   }
 
   try {
+    // Collect tokens that had BUY events in this batch to check coordination per token over last window
+    const touchedTokens = new Set<string>();
     for (const evt of events) {
       if (DEBUG_EVENTS) {
         const keys = evt && typeof evt === "object" ? Object.keys(evt as any) : [];
@@ -174,7 +186,7 @@ app.post(
           },
         })
       );
-      let wrote = 0;
+  let wrote = 0;
       try {
         const res = await prisma.$transaction(ops);
         wrote = res.length; // all succeeded; upsert returns existing or created
@@ -191,14 +203,71 @@ app.post(
         }
       }
       if (DEBUG_EVENTS) console.log(`[webhook] upserts succeeded: ${wrote}/${toWrite.length}`);
+
+      // Record token for BUY side only to check coordination
+      for (const p of toWrite) {
+        if (p.side === "BUY") touchedTokens.add(p.tokenAddress);
+      }
     }
 
     if (DEBUG_EVENTS && (!events || events.length === 0)) {
       console.log("[webhook] received empty events array");
     }
 
-  // Ack quickly on success
-  res.status(200).json({ ok: true });
+    // After processing all events, check coordinated buys per token over the last window [now-W, now)
+    const now = new Date();
+    const start = new Date(now.getTime() - WINDOW_MS);
+    const windowStart = floorToWindowStart(now);
+    const windowEnd = new Date(windowStart.getTime() + WINDOW_MS);
+    for (const tokenAddress of touchedTokens) {
+      const rows = await prisma.transferEvent.findMany({
+        where: { tokenAddress, side: "BUY", timestamp: { gte: start, lt: now } },
+        select: { walletAddress: true },
+      });
+      const uniq = Array.from(new Set(rows.map(r => r.walletAddress))).sort();
+      if (uniq.length >= COORDINATED_MIN_WALLETS) {
+        try {
+          const existing = await prisma.coordinatedTrade.findFirst({
+            where: { tokenAddress, windowStart },
+            select: { id: true },
+          });
+          if (existing) {
+            await prisma.coordinatedTrade.update({
+              where: { id: existing.id },
+              data: {
+                uniqueWalletCount: uniq.length,
+                walletAddresses: JSON.stringify(uniq),
+                windowEnd,
+                triggeredAt: now,
+              },
+            });
+          } else {
+            await prisma.coordinatedTrade.create({
+              data: {
+                tokenAddress,
+                windowStart,
+                windowEnd,
+                triggeredAt: now,
+                uniqueWalletCount: uniq.length,
+                walletAddresses: JSON.stringify(uniq),
+              },
+            });
+          }
+          if (DEBUG_EVENTS) {
+            console.log("[coord] detected coordinated BUY:", {
+              token: tokenAddress,
+              windowStart: windowStart.toISOString(),
+              count: uniq.length,
+            });
+          }
+        } catch (e) {
+          if (DEBUG_EVENTS) console.warn("[coord] upsert failed", e);
+        }
+      }
+    }
+
+    // Ack quickly on success
+    res.status(200).json({ ok: true });
   } catch (e) {
     console.error("Error handling webhook:", e);
   // Return 500 so Helius will retry delivery
@@ -231,4 +300,81 @@ app.use(function bodyParseErrorHandler(
 
 app.listen(PORT, () => {
   console.log(`Server listening on :${PORT}`);
+  console.log("[config]", {
+    DATABASE_URL: process.env.DATABASE_URL,
+    PORT,
+    EXCLUDE_TOKENS: Array.from(EXCLUDE_TOKENS),
+    MIN_AMOUNT,
+    DEDUP_BY_SIGNATURE_ONLY,
+    COORDINATED_WINDOW_MINUTES,
+    COORDINATED_MIN_WALLETS,
+    DEBUG_EVENTS,
+    DEBUG_EVENTS_VERBOSE,
+  });
+  // Background scanner: periodically scan the last window for coordinated buys
+  const intervalMs = Math.min(60_000, Math.max(10_000, Math.floor(WINDOW_MS / 2)));
+  const scan = async () => {
+    try {
+      const now = new Date();
+      const start = new Date(now.getTime() - WINDOW_MS);
+      const end = now;
+      // Find tokens with BUYs in the window
+      const tokenRows = await prisma.transferEvent.findMany({
+        where: { side: "BUY", timestamp: { gte: start, lt: end } },
+        select: { tokenAddress: true },
+        distinct: ["tokenAddress"],
+      });
+      for (const tr of tokenRows) {
+        const token = tr.tokenAddress;
+        const buyers = await prisma.transferEvent.findMany({
+          where: { tokenAddress: token, side: "BUY", timestamp: { gte: start, lt: end } },
+          select: { walletAddress: true },
+          distinct: ["walletAddress"],
+        });
+        const uniq = buyers.map(b => b.walletAddress);
+        if (uniq.length >= COORDINATED_MIN_WALLETS) {
+          const windowStart = floorToWindowStart(start);
+          const windowEnd = new Date(windowStart.getTime() + WINDOW_MS);
+          const existing = await prisma.coordinatedTrade.findFirst({
+            where: { tokenAddress: token, windowStart },
+            select: { id: true },
+          });
+          if (existing) {
+            await prisma.coordinatedTrade.update({
+              where: { id: existing.id },
+              data: {
+                uniqueWalletCount: uniq.length,
+                walletAddresses: JSON.stringify(uniq),
+                windowEnd,
+                triggeredAt: now,
+              },
+            });
+          } else {
+            await prisma.coordinatedTrade.create({
+              data: {
+                tokenAddress: token,
+                windowStart,
+                windowEnd,
+                triggeredAt: now,
+                uniqueWalletCount: uniq.length,
+                walletAddresses: JSON.stringify(uniq),
+              },
+            });
+          }
+          if (DEBUG_EVENTS) {
+            console.log("[coord/bg] coordinated BUY:", {
+              token,
+              windowStart: windowStart.toISOString(),
+              count: uniq.length,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      if (DEBUG_EVENTS) console.warn("[coord/bg] scan failed", e);
+    }
+  };
+  // Run soon after start then on interval
+  scan();
+  setInterval(scan, intervalMs);
 });
