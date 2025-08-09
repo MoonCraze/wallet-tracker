@@ -2,7 +2,7 @@ import "dotenv/config";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { PrismaClient } from "@prisma/client";
-import { parseHeliusEvent } from "../src/utils/parse.js";
+import { parseHeliusEvent, WSOL_MINT } from "../src/utils/parse.js";
 async function main() {
     const logFile = new URL("../logs/events.ndjson", import.meta.url);
     const logPath = logFile.pathname.startsWith("/") && process.platform === "win32"
@@ -15,6 +15,16 @@ async function main() {
     // Load tracked wallets
     const wallets = JSON.parse(readFileSync(new URL("../src/wallets.json", import.meta.url), "utf-8"));
     const tracked = new Set(wallets);
+    // Config mirrors server: EXCLUDE_TOKENS and MIN_AMOUNT
+    const EXCLUDE_TOKENS = new Set((process.env.EXCLUDE_TOKENS || WSOL_MINT)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean));
+    const MIN_AMOUNT = (() => {
+        const v = parseFloat(process.env.MIN_AMOUNT || "1");
+        return Number.isFinite(v) ? v : 1;
+    })();
+    const DEDUP_BY_SIGNATURE_ONLY = process.env.DEDUP_BY_SIGNATURE_ONLY === "1" || process.env.DEDUP_BY_SIGNATURE_ONLY === "true";
     console.log("Replaying events from:", logPath);
     console.log("Tracked wallets:", wallets.length);
     const rl = createInterface({
@@ -43,34 +53,60 @@ async function main() {
         }
         const evt = rec?.event ?? rec; // tolerate raw events if present
         const parsed = parseHeliusEvent(evt, tracked);
+        const filtered = parsed.filter((p) => {
+            if (EXCLUDE_TOKENS.has(p.tokenAddress))
+                return false;
+            const amt = Math.abs(Number(p.amount));
+            if (!Number.isFinite(amt) || amt < MIN_AMOUNT)
+                return false;
+            return true;
+        });
         parsedTotal += parsed.length;
-        for (const p of parsed) {
-            try {
-                await prisma.transferEvent.create({
-                    data: {
+        // Deduplicate within this line's event
+        const unique = new Map();
+        for (const p of filtered) {
+            const key = DEDUP_BY_SIGNATURE_ONLY
+                ? p.signature
+                : `${p.walletAddress}|${p.tokenAddress}|${p.signature}`;
+            if (!unique.has(key))
+                unique.set(key, p);
+        }
+        const toWrite = Array.from(unique.values());
+        if (toWrite.length > 0) {
+            const ops = toWrite.map((p) => prisma.transferEvent.upsert({
+                where: {
+                    wallet_token_sig_unique: {
                         walletAddress: p.walletAddress,
                         tokenAddress: p.tokenAddress,
-                        amount: p.amount,
                         signature: p.signature,
-                        timestamp: new Date(p.timestamp),
-                        side: p.side,
                     },
-                });
-                created++;
-            }
-            catch (e) {
-                if (e?.code === "P2002") {
-                    duplicates++;
-                    continue;
-                }
-                errors++;
-                console.error("[replay] create failed", {
+                },
+                update: {},
+                create: {
                     walletAddress: p.walletAddress,
                     tokenAddress: p.tokenAddress,
+                    amount: p.amount,
                     signature: p.signature,
-                    code: e?.code || e?.name || "unknown",
-                    message: e?.message,
-                });
+                    timestamp: new Date(p.timestamp),
+                    side: p.side,
+                },
+            }));
+            try {
+                await prisma.$transaction(ops);
+                created += toWrite.length; // either created or matched existing; treat as handled
+            }
+            catch (e) {
+                // If transaction fails, fall back to sequential upserts to continue progress
+                for (const op of ops) {
+                    try {
+                        await op;
+                        created++;
+                    }
+                    catch (e2) {
+                        // Count as error; upsert should not P2002
+                        errors++;
+                    }
+                }
             }
         }
     }

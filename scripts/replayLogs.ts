@@ -2,7 +2,7 @@ import "dotenv/config";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { PrismaClient } from "@prisma/client";
-import { parseHeliusEvent } from "../src/utils/parse.js";
+import { parseHeliusEvent, WSOL_MINT } from "../src/utils/parse.js";
 
 async function main() {
   const logFile = new URL("../logs/events.ndjson", import.meta.url);
@@ -20,6 +20,19 @@ async function main() {
     readFileSync(new URL("../src/wallets.json", import.meta.url), "utf-8")
   );
   const tracked = new Set<string>(wallets);
+
+  // Config mirrors server: EXCLUDE_TOKENS and MIN_AMOUNT
+  const EXCLUDE_TOKENS: Set<string> = new Set(
+    (process.env.EXCLUDE_TOKENS || WSOL_MINT)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+  const MIN_AMOUNT: number = (() => {
+    const v = parseFloat(process.env.MIN_AMOUNT || "1");
+    return Number.isFinite(v) ? v : 1;
+  })();
+  const DEDUP_BY_SIGNATURE_ONLY = process.env.DEDUP_BY_SIGNATURE_ONLY === "1" || process.env.DEDUP_BY_SIGNATURE_ONLY === "true";
 
   console.log("Replaying events from:", logPath);
   console.log("Tracked wallets:", wallets.length);
@@ -51,11 +64,34 @@ async function main() {
     }
     const evt = rec?.event ?? rec; // tolerate raw events if present
     const parsed = parseHeliusEvent(evt, tracked);
+    const filtered = parsed.filter((p) => {
+      if (EXCLUDE_TOKENS.has(p.tokenAddress)) return false;
+      const amt = Math.abs(Number(p.amount));
+      if (!Number.isFinite(amt) || amt < MIN_AMOUNT) return false;
+      return true;
+    });
     parsedTotal += parsed.length;
-    for (const p of parsed) {
-      try {
-        await prisma.transferEvent.create({
-          data: {
+    // Deduplicate within this line's event
+    const unique = new Map<string, typeof filtered[number]>();
+    for (const p of filtered) {
+      const key = DEDUP_BY_SIGNATURE_ONLY
+        ? p.signature
+        : `${p.walletAddress}|${p.tokenAddress}|${p.signature}`;
+      if (!unique.has(key)) unique.set(key, p);
+    }
+    const toWrite = Array.from(unique.values());
+    if (toWrite.length > 0) {
+      const ops = toWrite.map((p) =>
+        prisma.transferEvent.upsert({
+          where: {
+            wallet_token_sig_unique: {
+              walletAddress: p.walletAddress,
+              tokenAddress: p.tokenAddress,
+              signature: p.signature,
+            },
+          },
+          update: {},
+          create: {
             walletAddress: p.walletAddress,
             tokenAddress: p.tokenAddress,
             amount: p.amount,
@@ -63,21 +99,22 @@ async function main() {
             timestamp: new Date(p.timestamp),
             side: p.side,
           },
-        });
-        created++;
+        })
+      );
+      try {
+        await prisma.$transaction(ops);
+        created += toWrite.length; // either created or matched existing; treat as handled
       } catch (e: any) {
-        if (e?.code === "P2002") {
-          duplicates++;
-          continue;
+        // If transaction fails, fall back to sequential upserts to continue progress
+        for (const op of ops) {
+          try {
+            await op;
+            created++;
+          } catch (e2: any) {
+            // Count as error; upsert should not P2002
+            errors++;
+          }
         }
-        errors++;
-        console.error("[replay] create failed", {
-          walletAddress: p.walletAddress,
-          tokenAddress: p.tokenAddress,
-          signature: p.signature,
-          code: e?.code || e?.name || "unknown",
-          message: e?.message,
-        });
       }
     }
   }

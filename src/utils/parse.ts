@@ -72,11 +72,12 @@ const DEBUG_EVENTS_VERBOSE =
   process.env.DEBUG_EVENTS_VERBOSE === "1" ||
   process.env.DEBUG_EVENTS_VERBOSE === "true";
 
-// Convert lamports to SOL string
+// Convert lamports (integer) to SOL string with fixed 9 decimals
 function lamportsToSolStr(v: number | string | undefined): string {
-  if (v === undefined) return "0";
-  const n = typeof v === "string" ? Number(v) : v;
-  return (n / 1_000_000_000).toString();
+  if (v === undefined) return "0.000000000";
+  // Ensure we operate on integer-string to avoid scientific notation or FP issues
+  const asStr = typeof v === "string" ? v : Math.trunc(v).toString();
+  return toDecimalString(asStr, 9);
 }
 
 // Convert a raw integer amount and decimals into a decimal string

@@ -1,46 +1,81 @@
-# Helius 100-Wallet Realtime Tracker
+# Helius Whale Wallet Tracker
 
-Track ~100 Solana wallets with a Helius webhook. Saves events to SQLite via Prisma.
+Track Solana wallets via Helius Enhanced Webhooks and store results in SQLite using Prisma. Tuned for whale tracking: excludes common tokens (SOL by default) and small transfers (< 1 by default). Fully configurable via .env.
 
-## 1) Install & configure
-```bash
-pnpm i   # or npm i / yarn
-cp .env.example .env
-# fill in HELIUS_API_KEY, WEBHOOK_URL (public https://your-domain.com/helius), WEBHOOK_SECRET
+## Features
+- Enhanced webhook parser (tokenTransfers, nativeTransfers, accountData)
+- Idempotent persistence with compound unique key
+- In-memory dedup per event and upsert in a single transaction
+- Configurable filters: EXCLUDE_TOKENS and MIN_AMOUNT
+- Optional coarse dedup by signature only
+- NDJSON logging for offline replay and debugging
 
-pnpm db:generate
-pnpm db:migrate
+## Setup
+1) Install deps
+```powershell
+npm i
+```
 
-pnpm dev
-# or build+run
-pnpm build && node dist/index.js
+2) Configure environment
+```powershell
+Copy-Item .env.example .env
+# Fill HELIUS_API_KEY, WEBHOOK_URL, and adjust filters if needed
+```
 
-pnpm webhook:update
+Important .env keys:
+- HELIUS_API_KEY: your Helius API key (webhook:update script)
+- WEBHOOK_URL: public https URL to your /helius endpoint (e.g., Cloudflared)
+- WEBHOOK_SECRET: shared secret; verification accepts X-Helius-Secret or Authorization: Bearer <secret>
+- DATABASE_URL: SQLite file (default prisma/dev.db)
+- EXCLUDE_TOKENS: comma-separated mints to ignore (default: WSOL mint for SOL)
+  - To track SOL, set EXCLUDE_TOKENS=""
+- MIN_AMOUNT: minimum abs amount to save (default: 1)
+- DEDUP_BY_SIGNATURE_ONLY: 1 to dedup by signature alone (optional, default 0)
+- DEBUG_EVENTS / DEBUG_EVENTS_VERBOSE: set to 1 for more logs
 
-pnpm db:studio
+3) Initialize DB
+```powershell
+npm run db:generate; npm run db:migrate
+```
 
-Notes:
-- Webhook verification accepts `x-helius-secret: <secret>` or `Authorization: Bearer <secret>`.
-- On internal errors the webhook now returns HTTP 500 so Helius retries delivery.
-- The webhook update script accepts either `HELIUS_API_KEY` or legacy `HELlUS_API_KEY`.
+4) Start the server
+```powershell
+npm run dev
+# or build and run
+npm run build; node dist/index.js
+```
 
-Troubleshooting:
-- Set `DEBUG_EVENTS=1` when running the server to log why events were skipped (useful to confirm wallet address matches against `fromUserAccount`/`toUserAccount`).
-
-winget install Cloudflare.cloudflared
+5) Expose your local server (optional via Cloudflared)
+```powershell
+# Install once: winget install Cloudflare.cloudflared
 cloudflared tunnel login
-
-npm run webhook:update
-
-npm run db:studio
-
-Steps
-
-# 1) Start the dev server
-$env:PORT="8080"; $env:DEBUG_EVENTS="1"; npm run dev
-
-# 2) Start the tunnel (assumes your tunnel maps to http://localhost:8080)
 cloudflared tunnel run helius-tracker
+```
 
-# 3) (Re)register/update the Helius webhook
+6) Register/update the Helius webhook
+```powershell
 npm run webhook:update
+```
+
+7) Inspect DB
+```powershell
+npm run db:studio
+```
+
+## Scripts
+- npm run dev: start server with tsx watch
+- npm run build: compile TypeScript
+- npm run start: run compiled server
+- npm run db:generate / db:migrate / db:studio: Prisma workflow
+- npm run webhook:update: create/update Helius enhanced webhook (uses wallets.json)
+- npm run replay: reprocess logs/events.ndjson using the same parser and filters
+
+## Filters and dedup behavior
+- Default excludes SOL (WSOL mint), so only SPL tokens are saved unless you override EXCLUDE_TOKENS
+- Default MIN_AMOUNT=1 skips dust; set to higher values for whales
+- Dedup within each payload by (walletAddress, tokenAddress, signature). Enable DEDUP_BY_SIGNATURE_ONLY=1 to dedup more aggressively by signature
+
+## Troubleshooting
+- Set DEBUG_EVENTS=1 to see webhook summaries and parsed samples; set DEBUG_EVENTS_VERBOSE=1 to see skip/filter details
+- If Helius sends duplicates or retries, upserts ensure idempotency
+- With DEBUG_EVENTS=1, incoming events are logged to logs/events.ndjson for offline replay

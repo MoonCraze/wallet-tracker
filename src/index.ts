@@ -3,7 +3,7 @@ import express, { NextFunction, Request, Response } from "express";
 import { readFileSync, mkdirSync, appendFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { prisma } from "./db.js";
-import { parseHeliusEvent } from "./utils/parse.js";
+import { parseHeliusEvent, WSOL_MINT } from "./utils/parse.js";
 import { verifyHeliusSecret } from "./verify.js";
 
 const app = express();
@@ -19,6 +19,20 @@ const wallets: string[] = JSON.parse(
 );
 // Build a Set for quick membership checks
 const tracked = new Set<string>(wallets);
+
+// Config: token exclusion and minimum amount threshold (default: exclude SOL and < 1)
+const EXCLUDE_TOKENS: Set<string> = new Set(
+  (process.env.EXCLUDE_TOKENS || WSOL_MINT)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+const MIN_AMOUNT: number = (() => {
+  const v = parseFloat(process.env.MIN_AMOUNT || "1");
+  return Number.isFinite(v) ? v : 1;
+})();
+// Optional coarser dedup mode: treat signature as unique regardless of token/wallet
+const DEDUP_BY_SIGNATURE_ONLY = process.env.DEDUP_BY_SIGNATURE_ONLY === "1" || process.env.DEDUP_BY_SIGNATURE_ONLY === "true";
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
@@ -95,10 +109,27 @@ app.post(
         console.log("[webhook] event keys:", keys.slice(0, 20));
       }
       const parsed = parseHeliusEvent(evt, tracked);
+      // Apply filters: exclude common tokens and small amounts
+      const filtered = parsed.filter((p) => {
+        if (EXCLUDE_TOKENS.has(p.tokenAddress)) {
+          if (DEBUG_EVENTS_VERBOSE) {
+            console.log("[filter] exclude token", { tokenAddress: p.tokenAddress, signature: p.signature });
+          }
+          return false;
+        }
+        const amt = Math.abs(Number(p.amount));
+        if (!Number.isFinite(amt) || amt < MIN_AMOUNT) {
+          if (DEBUG_EVENTS_VERBOSE) {
+            console.log("[filter] below min amount", { amount: p.amount, min: MIN_AMOUNT, signature: p.signature });
+          }
+          return false;
+        }
+        return true;
+      });
       if (DEBUG_EVENTS) {
         console.log(`[webhook] parsed transfers: ${parsed.length}`);
         if (parsed.length > 0) {
-          const peek = parsed.slice(0, 2).map(p => ({
+          const peek = filtered.slice(0, 2).map(p => ({
             walletAddress: p.walletAddress,
             tokenAddress: p.tokenAddress,
             amount: p.amount,
@@ -106,48 +137,60 @@ app.post(
             signature: p.signature,
           }));
           console.log("[webhook] parsed sample:", peek);
+          const dropped = parsed.length - filtered.length;
+          if (dropped > 0) console.log(`[webhook] filtered out: ${dropped}`);
         }
       }
-      if (parsed.length === 0) continue;
+      if (filtered.length === 0) continue;
 
-      let wrote = 0;
-      for (const p of parsed) {
-        try {
-          await prisma.transferEvent.create({
-            data: {
+      // Deduplicate within this payload by (walletAddress, tokenAddress, signature)
+      const unique = new Map<string, typeof filtered[number]>();
+      for (const p of filtered) {
+        const key = DEDUP_BY_SIGNATURE_ONLY
+          ? p.signature
+          : `${p.walletAddress}|${p.tokenAddress}|${p.signature}`;
+        if (!unique.has(key)) unique.set(key, p);
+      }
+      const toWrite = Array.from(unique.values());
+
+      // Upsert with compound unique key to avoid exceptions on duplicates
+      const ops = toWrite.map((p) =>
+        prisma.transferEvent.upsert({
+          where: {
+            wallet_token_sig_unique: {
               walletAddress: p.walletAddress,
               tokenAddress: p.tokenAddress,
-              amount: p.amount,
               signature: p.signature,
-              timestamp: new Date(p.timestamp),
-              side: p.side,
             },
-          });
-          wrote++;
-        } catch (e: any) {
-          const code = e?.code || e?.name || "unknown";
-          const message = e?.message;
-          // P2002 => Unique constraint failed (duplicate). Safe to ignore for idempotency.
-          if (code === "P2002") {
-            if (DEBUG_EVENTS_VERBOSE) {
-              console.log("[db] duplicate, skipping", {
-                walletAddress: p.walletAddress,
-                tokenAddress: p.tokenAddress,
-                signature: p.signature,
-              });
-            }
-            continue;
-          }
-          console.error("[db] create failed", {
+          },
+          update: {},
+          create: {
             walletAddress: p.walletAddress,
             tokenAddress: p.tokenAddress,
+            amount: p.amount,
             signature: p.signature,
-            error: code,
-            message,
-          });
+            timestamp: new Date(p.timestamp),
+            side: p.side,
+          },
+        })
+      );
+      let wrote = 0;
+      try {
+        const res = await prisma.$transaction(ops);
+        wrote = res.length; // all succeeded; upsert returns existing or created
+      } catch (e) {
+        // Fall back to sequential to surface any unexpected issues without aborting all
+        wrote = 0;
+        for (const op of ops) {
+          try {
+            await op;
+            wrote++;
+          } catch (err) {
+            if (DEBUG_EVENTS_VERBOSE) console.warn("[db] upsert failed for one row", err);
+          }
         }
       }
-      if (DEBUG_EVENTS) console.log(`[webhook] upserts succeeded: ${wrote}/${parsed.length}`);
+      if (DEBUG_EVENTS) console.log(`[webhook] upserts succeeded: ${wrote}/${toWrite.length}`);
     }
 
     if (DEBUG_EVENTS && (!events || events.length === 0)) {
