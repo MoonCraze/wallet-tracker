@@ -28,12 +28,23 @@ const allClients = new Set<Response>();
 // Keep-alive timers per response to prevent proxies from closing the stream
 const heartbeats = new WeakMap<Response, NodeJS.Timeout>();
 
-function setupSse(res: Response) {
+function setupSse(res: Response, origin?: string) {
   res.status(200);
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGINS || "*");
+  
+  // Apply same CORS logic as main API
+  const allowedOrigins = process.env.ALLOWED_ORIGINS;
+  if (allowedOrigins === '*' || !allowedOrigins) {
+    res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  } else if (allowedOrigins && origin) {
+    const origins = allowedOrigins.split(',').map(o => o.trim());
+    if (origins.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+  }
+  
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Cache-Control");
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -58,7 +69,8 @@ function teardownSse(res: Response) {
 
 export function initRealtime(app: Express, _server?: HttpServer) {
   app.get("/stream/transfers", (req: Request, res: Response) => {
-    setupSse(res);
+    const origin = req.headers.origin as string;
+    setupSse(res, origin);
     transfersClients.add(res);
     req.on("close", () => {
       transfersClients.delete(res);
@@ -67,7 +79,8 @@ export function initRealtime(app: Express, _server?: HttpServer) {
   });
 
   app.get("/stream/coordinated", (req: Request, res: Response) => {
-    setupSse(res);
+    const origin = req.headers.origin as string;
+    setupSse(res, origin);
     coordinatedClients.add(res);
     req.on("close", () => {
       coordinatedClients.delete(res);
@@ -77,7 +90,8 @@ export function initRealtime(app: Express, _server?: HttpServer) {
 
   // Combined stream: includes named events for routing client-side
   app.get("/stream/all", (req: Request, res: Response) => {
-    setupSse(res);
+    const origin = req.headers.origin as string;
+    setupSse(res, origin);
     allClients.add(res);
     req.on("close", () => {
       allClients.delete(res);

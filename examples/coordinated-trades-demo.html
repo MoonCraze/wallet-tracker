@@ -350,9 +350,7 @@
                     this.eventSource.close();
                 }
 
-                this.eventSource = new EventSource(`${this.baseUrl}/stream/coordinated`, {
-                    withCredentials: true
-                });
+                this.eventSource = new EventSource(`${this.baseUrl}/stream/coordinated`);
                 
                 this.eventSource.onopen = () => {
                     this.updateConnectionStatus(true);
