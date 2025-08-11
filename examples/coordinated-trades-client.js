@@ -2,9 +2,18 @@
 // This file demonstrates how to integrate with the coordinated trades API
 
 class CoordinatedTradesClient {
-  constructor(baseUrl = 'http://localhost:8080') {
+  constructor(baseUrl = 'https://helius.wonderswhisper.com/') {
     this.baseUrl = baseUrl;
     this.eventSource = null;
+    
+    // Default fetch options for CORS
+    this.defaultFetchOptions = {
+      mode: 'cors',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    };
   }
 
   /**
@@ -16,7 +25,8 @@ class CoordinatedTradesClient {
   async fetchCoordinatedTrades(page = 1, limit = 50) {
     try {
       const response = await fetch(
-        `${this.baseUrl}/dev/db/coordinated?page=${page}&limit=${limit}`
+        `${this.baseUrl}/dev/db/coordinated?page=${page}&limit=${limit}`,
+        this.defaultFetchOptions
       );
       
       if (!response.ok) {
@@ -49,7 +59,10 @@ class CoordinatedTradesClient {
       this.eventSource.close();
     }
 
-    this.eventSource = new EventSource(`${this.baseUrl}/stream/coordinated`);
+    // For EventSource, credentials are handled via withCredentials
+    this.eventSource = new EventSource(`${this.baseUrl}/stream/coordinated`, {
+      withCredentials: true
+    });
     
     this.eventSource.onmessage = (event) => {
       try {
@@ -85,7 +98,9 @@ class CoordinatedTradesClient {
       this.eventSource.close();
     }
 
-    this.eventSource = new EventSource(`${this.baseUrl}/stream/all`);
+    this.eventSource = new EventSource(`${this.baseUrl}/stream/all`, {
+      withCredentials: true
+    });
     
     this.eventSource.addEventListener('coordinated', (event) => {
       try {
@@ -121,7 +136,7 @@ class CoordinatedTradesClient {
    */
   async getConfig() {
     try {
-      const response = await fetch(`${this.baseUrl}/config`);
+      const response = await fetch(`${this.baseUrl}/config`, this.defaultFetchOptions);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -140,10 +155,8 @@ class CoordinatedTradesClient {
   async updateConfig(configUpdate) {
     try {
       const response = await fetch(`${this.baseUrl}/config`, {
+        ...this.defaultFetchOptions,
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify(configUpdate),
       });
       
