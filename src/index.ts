@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express, { NextFunction, Request, Response } from "express";
+import cors from "cors";
 import { createServer } from "node:http";
 import { readFileSync, mkdirSync, appendFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -10,6 +11,20 @@ import { parseHeliusEvent } from "./utils/parse.js";
 import { verifyHeliusSecret } from "./verify.js";
 
 const app = express();
+
+// CORS configuration for cross-origin requests
+const corsOptions = {
+  origin: process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+    : '*', // Allow all origins if ALLOWED_ORIGINS is not set
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-helius-secret'],
+  credentials: true,
+  optionsSuccessStatus: 200 // Some legacy browsers (IE11, various SmartTVs) choke on 204
+};
+
+app.use(cors(corsOptions));
+
 // Serve static files (e.g., test page) from ./public
 app.use(express.static("public"));
 // Create HTTP server and initialize realtime (SSE + WS)

@@ -33,7 +33,10 @@ function setupSse(res: Response) {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGINS || "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Cache-Control");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
   (res as any).flushHeaders?.();
   res.write(": connected\n\n");
   const t = setInterval(() => {

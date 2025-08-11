@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import cors from "cors";
 import { createServer } from "node:http";
 import { readFileSync, mkdirSync, appendFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -9,6 +10,17 @@ import { getConfig, setConfig, configToJSON } from "./config.js";
 import { parseHeliusEvent } from "./utils/parse.js";
 import { verifyHeliusSecret } from "./verify.js";
 const app = express();
+// CORS configuration for cross-origin requests
+const corsOptions = {
+    origin: process.env.ALLOWED_ORIGINS
+        ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+        : '*', // Allow all origins if ALLOWED_ORIGINS is not set
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-helius-secret'],
+    credentials: true,
+    optionsSuccessStatus: 200 // Some legacy browsers (IE11, various SmartTVs) choke on 204
+};
+app.use(cors(corsOptions));
 // Serve static files (e.g., test page) from ./public
 app.use(express.static("public"));
 // Create HTTP server and initialize realtime (SSE + WS)
@@ -35,6 +47,8 @@ function floorToWindowStart(d) {
     const w = WINDOW_MS();
     return new Date(Math.floor(t / w) * w);
 }
+// Serve static files
+app.use(express.static("public"));
 app.get("/health", (_req, res) => res.json({ ok: true }));
 // Config endpoints: GET current config, PATCH to update at runtime
 app.get("/config", (_req, res) => {
@@ -87,6 +101,82 @@ if (ALLOW_DEV_ENDPOINTS) {
         }
         catch { }
         res.json({ ok: true });
+    });
+    // Simple database viewer endpoints
+    app.get("/dev/db/transfers", async (req, res) => {
+        try {
+            const page = parseInt(req.query.page) || 1;
+            const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+            const offset = (page - 1) * limit;
+            const transfers = await prisma.transferEvent.findMany({
+                take: limit,
+                skip: offset,
+                orderBy: { timestamp: 'desc' }
+            });
+            const total = await prisma.transferEvent.count();
+            res.json({
+                transfers,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    pages: Math.ceil(total / limit)
+                }
+            });
+        }
+        catch (e) {
+            res.status(500).json({ error: e?.message || "database error" });
+        }
+    });
+    app.get("/dev/db/coordinated", async (req, res) => {
+        try {
+            const page = parseInt(req.query.page) || 1;
+            const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+            const offset = (page - 1) * limit;
+            const coordinated = await prisma.coordinatedTrade.findMany({
+                take: limit,
+                skip: offset,
+                orderBy: { triggeredAt: 'desc' }
+            });
+            const total = await prisma.coordinatedTrade.count();
+            res.json({
+                coordinated,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    pages: Math.ceil(total / limit)
+                }
+            });
+        }
+        catch (e) {
+            res.status(500).json({ error: e?.message || "database error" });
+        }
+    });
+    app.get("/dev/db/stats", async (req, res) => {
+        try {
+            const transferCount = await prisma.transferEvent.count();
+            const coordinatedCount = await prisma.coordinatedTrade.count();
+            const buyCount = await prisma.transferEvent.count({ where: { side: 'BUY' } });
+            const sellCount = await prisma.transferEvent.count({ where: { side: 'SELL' } });
+            const recentTransfers = await prisma.transferEvent.findMany({
+                take: 5,
+                orderBy: { timestamp: 'desc' },
+                select: { timestamp: true, walletAddress: true, tokenAddress: true, amount: true, side: true }
+            });
+            res.json({
+                stats: {
+                    totalTransfers: transferCount,
+                    totalCoordinated: coordinatedCount,
+                    totalBuys: buyCount,
+                    totalSells: sellCount
+                },
+                recentTransfers
+            });
+        }
+        catch (e) {
+            res.status(500).json({ error: e?.message || "database error" });
+        }
     });
 }
 // Surface DB path and CWD up front to catch env/path mismatches

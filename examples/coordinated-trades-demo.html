@@ -298,17 +298,29 @@
     <script>
         class CoordinatedTradesDemo {
             constructor() {
-                this.baseUrl = 'http://localhost:8080';
+                this.baseUrl = 'https://helius.wonderswhisper.com';
                 this.eventSource = null;
                 this.currentPage = 1;
                 this.totalPages = 1;
                 this.trades = [];
                 this.realtimeCount = 0;
+                
+                // Default fetch options for CORS
+                this.defaultFetchOptions = {
+                    mode: 'cors',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                };
             }
 
             async loadHistoricalTrades(page = 1) {
                 try {
-                    const response = await fetch(`${this.baseUrl}/dev/db/coordinated?page=${page}&limit=20`);
+                    const response = await fetch(
+                        `${this.baseUrl}/dev/db/coordinated?page=${page}&limit=20`,
+                        this.defaultFetchOptions
+                    );
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     
                     const data = await response.json();
@@ -338,7 +350,9 @@
                     this.eventSource.close();
                 }
 
-                this.eventSource = new EventSource(`${this.baseUrl}/stream/coordinated`);
+                this.eventSource = new EventSource(`${this.baseUrl}/stream/coordinated`, {
+                    withCredentials: true
+                });
                 
                 this.eventSource.onopen = () => {
                     this.updateConnectionStatus(true);
@@ -462,7 +476,7 @@
 
             async loadConfig() {
                 try {
-                    const response = await fetch(`${this.baseUrl}/config`);
+                    const response = await fetch(`${this.baseUrl}/config`, this.defaultFetchOptions);
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     
                     const config = await response.json();
@@ -485,8 +499,8 @@
                     };
 
                     const response = await fetch(`${this.baseUrl}/config`, {
+                        ...this.defaultFetchOptions,
                         method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(configUpdate)
                     });
 

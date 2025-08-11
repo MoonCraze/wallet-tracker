@@ -7,6 +7,29 @@ This API provides access to coordinated trading data detected by the Helius Wall
 - Development: `http://localhost:8080`
 - Production: `[Your production URL]`
 
+## CORS Configuration
+The API supports Cross-Origin Resource Sharing (CORS) for access from different domains/locations.
+
+### Environment Variables
+Configure CORS by setting the `ALLOWED_ORIGINS` environment variable:
+
+```bash
+# Allow all origins (for development)
+ALLOWED_ORIGINS=*
+
+# Allow specific origins (for production)
+ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com,http://localhost:3000
+
+# Enable development endpoints
+ALLOW_DEV_ENDPOINTS=1
+```
+
+### Supported CORS Headers
+- **Origin**: Configurable via `ALLOWED_ORIGINS`
+- **Methods**: `GET, POST, PATCH, PUT, DELETE, OPTIONS`
+- **Headers**: `Content-Type, Authorization, x-helius-secret`
+- **Credentials**: Supported (`Access-Control-Allow-Credentials: true`)
+
 ## Authentication
 - All endpoints are currently open (no authentication required)
 - Enable development endpoints by setting `ALLOW_DEV_ENDPOINTS=1` in environment variables
@@ -324,3 +347,62 @@ ALLOW_DEV_ENDPOINTS=1
 - The system uses a rolling time window for detection
 - Coordinated trades are detected in real-time as transactions occur
 - The database stores all historical coordinated trade events
+
+---
+
+## Accessing from Different Locations/PCs
+
+### For Development
+1. **Enable CORS for all origins**:
+   ```bash
+   ALLOWED_ORIGINS=*
+   ALLOW_DEV_ENDPOINTS=1
+   ```
+
+2. **Update the base URL in your frontend**:
+   ```javascript
+   // Replace localhost with your server's IP address or domain
+   const client = new CoordinatedTradesClient('http://192.168.1.100:8080');
+   // or
+   const client = new CoordinatedTradesClient('https://your-domain.com');
+   ```
+
+### For Production
+1. **Configure specific allowed origins**:
+   ```bash
+   ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+   ```
+
+2. **Use HTTPS for security**:
+   - Set up SSL/TLS certificates
+   - Use reverse proxy (nginx, cloudflare, etc.)
+   
+3. **Example production configuration**:
+   ```bash
+   NODE_ENV=production
+   ALLOWED_ORIGINS=https://myapp.com,https://www.myapp.com
+   ALLOW_DEV_ENDPOINTS=0  # Disable dev endpoints in production
+   ```
+
+### Network Access Examples
+
+#### Local Network Access
+```javascript
+// If your server is at IP 192.168.1.100
+const client = new CoordinatedTradesClient('http://192.168.1.100:8080');
+```
+
+#### Remote Access via Tunnel (Cloudflare, ngrok)
+```javascript
+// Using Cloudflare tunnel
+const client = new CoordinatedTradesClient('https://your-tunnel-domain.trycloudflare.com');
+
+// Using ngrok
+const client = new CoordinatedTradesClient('https://abc123.ngrok.io');
+```
+
+#### Production Domain
+```javascript
+// Production domain with SSL
+const client = new CoordinatedTradesClient('https://api.yourdomain.com');
+```
