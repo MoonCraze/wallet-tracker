@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Helius Wallet Tracker - Database Viewer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .section h2 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            color: #555;
+        }
+        
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .buy {
+            color: #28a745;
+            font-weight: bold;
+        }
+        
+        .sell {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-bottom: 15px;
+        }
+        
+        .refresh-btn:hover {
+            background: #5a6fd8;
+        }
+        
+        .wallet-address {
+            font-family: monospace;
+            font-size: 0.9em;
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        
+        .amount {
+            font-weight: bold;
+            text-align: right;
+        }
+        
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .pagination button {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        
+        .pagination button:hover:not(:disabled) {
+            background: #f0f0f0;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .pagination .current {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 Helius Wallet Tracker</h1>
+        <p>Real-time database monitoring for coordinated wallet activity</p>
+    </div>
+    
+    <div class="stats-container" id="statsContainer">
+        <div class="loading">Loading statistics...</div>
+    </div>
+    
+    <div class="section">
+        <h2>📊 Recent Transfers</h2>
+        <button class="refresh-btn" onclick="loadData()">🔄 Refresh Data</button>
+        <div id="transfersContainer">
+            <div class="loading">Loading transfers...</div>
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2>🤝 Coordinated Trades</h2>
+        <div id="coordinatedContainer">
+            <div class="loading">Loading coordinated trades...</div>
+        </div>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        const limit = 20;
+        
+        async function fetchData(endpoint) {
+            try {
+                const response = await fetch(endpoint);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error('Fetch error:', error);
+                throw error;
+            }
+        }
+        
+        async function loadStats() {
+            try {
+                const stats = await fetchData('/dev/db/stats');
+                
+                const statsHtml = `
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.stats.totalTransfers}</div>
+                        <div class="stat-label">Total Transfers</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.stats.totalBuys}</div>
+                        <div class="stat-label">Buy Orders</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.stats.totalSells}</div>
+                        <div class="stat-label">Sell Orders</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.stats.totalCoordinated}</div>
+                        <div class="stat-label">Coordinated Trades</div>
+                    </div>
+                `;
+                
+                document.getElementById('statsContainer').innerHTML = statsHtml;
+            } catch (error) {
+                document.getElementById('statsContainer').innerHTML = 
+                    `<div class="error">Error loading stats: ${error.message}</div>`;
+            }
+        }
+        
+        async function loadTransfers(page = 1) {
+            try {
+                currentPage = page;
+                const transfers = await fetchData(`/dev/db/transfers?page=${page}&limit=${limit}`);
+                
+                let transfersHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Wallet</th>
+                                <th>Token</th>
+                                <th>Amount</th>
+                                <th>Side</th>
+                                <th>Signature</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                transfers.transfers.forEach(transfer => {
+                    const timestamp = new Date(transfer.timestamp).toLocaleString();
+                    const shortWallet = transfer.walletAddress.substring(0, 8) + '...' + transfer.walletAddress.substring(-8);
+                    const shortToken = transfer.tokenAddress.substring(0, 8) + '...' + transfer.tokenAddress.substring(-8);
+                    const shortSig = transfer.signature.substring(0, 12) + '...';
+                    
+                    transfersHtml += `
+                        <tr>
+                            <td>${timestamp}</td>
+                            <td><span class="wallet-address">${shortWallet}</span></td>
+                            <td><span class="wallet-address">${shortToken}</span></td>
+                            <td class="amount">${parseFloat(transfer.amount).toLocaleString()}</td>
+                            <td class="${transfer.side.toLowerCase()}">${transfer.side}</td>
+                            <td><span class="wallet-address">${shortSig}</span></td>
+                        </tr>
+                    `;
+                });
+                
+                transfersHtml += `
+                        </tbody>
+                    </table>
+                    <div class="pagination">
+                        <button ${page <= 1 ? 'disabled' : ''} onclick="loadTransfers(${page - 1})">Previous</button>
+                        <button class="current">${page}</button>
+                        <button ${page >= transfers.pagination.pages ? 'disabled' : ''} onclick="loadTransfers(${page + 1})">Next</button>
+                        <span style="margin-left: 20px;">Page ${page} of ${transfers.pagination.pages} (${transfers.pagination.total} total)</span>
+                    </div>
+                `;
+                
+                document.getElementById('transfersContainer').innerHTML = transfersHtml;
+            } catch (error) {
+                document.getElementById('transfersContainer').innerHTML = 
+                    `<div class="error">Error loading transfers: ${error.message}</div>`;
+            }
+        }
+        
+        async function loadCoordinated() {
+            try {
+                const coordinated = await fetchData('/dev/db/coordinated');
+                
+                let coordinatedHtml = '';
+                
+                if (coordinated.coordinated.length === 0) {
+                    coordinatedHtml = '<p style="text-align: center; color: #666; padding: 40px;">No coordinated trades detected yet.</p>';
+                } else {
+                    coordinatedHtml = `
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Triggered At</th>
+                                    <th>Token</th>
+                                    <th>Wallet Count</th>
+                                    <th>Window</th>
+                                    <th>Wallets</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    `;
+                    
+                    coordinated.coordinated.forEach(trade => {
+                        const triggeredAt = new Date(trade.triggeredAt).toLocaleString();
+                        const shortToken = trade.tokenAddress.substring(0, 8) + '...' + trade.tokenAddress.substring(-8);
+                        const windowStart = new Date(trade.windowStart).toLocaleString();
+                        const windowEnd = new Date(trade.windowEnd).toLocaleString();
+                        const walletList = trade.walletAddresses.map(w => w.substring(0, 6) + '...').join(', ');
+                        
+                        coordinatedHtml += `
+                            <tr>
+                                <td>${triggeredAt}</td>
+                                <td><span class="wallet-address">${shortToken}</span></td>
+                                <td><strong>${trade.uniqueWalletCount}</strong></td>
+                                <td style="font-size: 0.9em;">${windowStart}<br>to<br>${windowEnd}</td>
+                                <td style="font-size: 0.8em;">${walletList}</td>
+                            </tr>
+                        `;
+                    });
+                    
+                    coordinatedHtml += '</tbody></table>';
+                }
+                
+                document.getElementById('coordinatedContainer').innerHTML = coordinatedHtml;
+            } catch (error) {
+                document.getElementById('coordinatedContainer').innerHTML = 
+                    `<div class="error">Error loading coordinated trades: ${error.message}</div>`;
+            }
+        }
+        
+        async function loadData() {
+            await Promise.all([
+                loadStats(),
+                loadTransfers(currentPage),
+                loadCoordinated()
+            ]);
+        }
+        
+        // Load data on page load
+        loadData();
+        
+        // Auto-refresh every 30 seconds
+        setInterval(loadData, 30000);
+    </script>
+</body>
+</html>

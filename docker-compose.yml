@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  helius-tracker:
+    build: .
+    ports:
+      - "8080:8080"  # Map container port 8080 to host port 8080
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - DATABASE_URL=file:/app/data/production.db
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-super-secret-change-me}
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - EXCLUDE_TOKENS=${EXCLUDE_TOKENS:-So11111111111111111111111111111111111111112}
+      - MIN_AMOUNT=${MIN_AMOUNT:-1}
+      - DEDUP_BY_SIGNATURE_ONLY=${DEDUP_BY_SIGNATURE_ONLY:-0}
+      - DEBUG_EVENTS=${DEBUG_EVENTS:-0}
+      - DEBUG_EVENTS_VERBOSE=${DEBUG_EVENTS_VERBOSE:-0}
+      - COORDINATED_WINDOW_MINUTES=${COORDINATED_WINDOW_MINUTES:-5}
+      - COORDINATED_MIN_WALLETS=${COORDINATED_MIN_WALLETS:-3}
+      - ALLOW_DEV_ENDPOINTS=${ALLOW_DEV_ENDPOINTS:-0}
+    volumes:
+      - helius_data:/app/data  # Persist SQLite database
+      - helius_logs:/app/logs  # Persist logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  prisma-studio:
+    build: .
+    ports:
+      - "5555:5555"
+    environment:
+      - DATABASE_URL=file:/app/data/production.db
+    volumes:
+      - helius_data:/app/data
+    command: npx prisma studio --hostname 0.0.0.0 --port 5555
+    depends_on:
+      - helius-tracker
+    restart: unless-stopped
+
+volumes:
+  helius_data:
+    driver: local
+  helius_logs:
+    driver: local

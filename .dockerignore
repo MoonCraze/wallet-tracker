@@ -1,0 +1,29 @@
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Environment files
+.env.production
+.env.local
+
+# Build output
+dist/
+
+# Database files
+*.db
+*.db-journal
+
+# Log files
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Dependencies
+node_modules/

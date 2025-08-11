@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Helius Tracker - Remote Client</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .connection-form {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .connection-form input {
+            width: 300px;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            margin-right: 10px;
+        }
+        .connection-form button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .connection-form button:hover {
+            background: #45a049;
+        }
+        .connection-form button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            text-align: center;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: rgba(76, 175, 80, 0.3);
+            border: 1px solid #4CAF50;
+        }
+        .status.disconnected {
+            background: rgba(244, 67, 54, 0.3);
+            border: 1px solid #f44336;
+        }
+        .status.connecting {
+            background: rgba(255, 193, 7, 0.3);
+            border: 1px solid #FF9800;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .panel h3 {
+            margin-top: 0;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+            padding-bottom: 10px;
+        }
+        .event-list {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .event {
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.1);
+            border-left: 4px solid #2196F3;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .event.transfer {
+            border-left-color: #4CAF50;
+        }
+        .event.coordinated {
+            border-left-color: #FF9800;
+        }
+        .event.buy {
+            background: rgba(76, 175, 80, 0.2);
+        }
+        .event.sell {
+            background: rgba(244, 67, 54, 0.2);
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-card .number {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-card .label {
+            font-size: 12px;
+            opacity: 0.8;
+        }
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            .connection-form input {
+                width: 200px;
+                margin-bottom: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Helius Wallet Tracker - Remote Client</h1>
+            <p>Connect to a remote Helius tracker instance to receive real-time wallet transaction data</p>
+        </div>
+
+        <div class="connection-form">
+            <input type="text" id="serverUrl" placeholder="http://192.168.1.100:8080" value="http://localhost:8080">
+            <button id="connectBtn" onclick="toggleConnection()">Connect</button>
+            <div id="connectionStatus" class="status disconnected">Disconnected</div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="number" id="totalTransfers">0</div>
+                <div class="label">Total Transfers</div>
+            </div>
+            <div class="stat-card">
+                <div class="number" id="totalBuys">0</div>
+                <div class="label">Total Buys</div>
+            </div>
+            <div class="stat-card">
+                <div class="number" id="totalSells">0</div>
+                <div class="label">Total Sells</div>
+            </div>
+            <div class="stat-card">
+                <div class="number" id="totalCoordinated">0</div>
+                <div class="label">Coordinated Trades</div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="panel">
+                <h3>📊 Recent Transfers</h3>
+                <div id="transferEvents" class="event-list">
+                    <div class="event">Waiting for connection...</div>
+                </div>
+            </div>
+            <div class="panel">
+                <h3>🔥 Coordinated Trades</h3>
+                <div id="coordinatedEvents" class="event-list">
+                    <div class="event">Waiting for connection...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let stats = {
+            totalTransfers: 0,
+            totalBuys: 0,
+            totalSells: 0,
+            totalCoordinated: 0
+        };
+
+        function updateStats() {
+            document.getElementById('totalTransfers').textContent = stats.totalTransfers;
+            document.getElementById('totalBuys').textContent = stats.totalBuys;
+            document.getElementById('totalSells').textContent = stats.totalSells;
+            document.getElementById('totalCoordinated').textContent = stats.totalCoordinated;
+        }
+
+        function setConnectionStatus(status, message) {
+            const statusEl = document.getElementById('connectionStatus');
+            const connectBtn = document.getElementById('connectBtn');
+            
+            statusEl.className = `status ${status}`;
+            statusEl.textContent = message;
+            
+            if (status === 'connected') {
+                connectBtn.textContent = 'Disconnect';
+                connectBtn.disabled = false;
+            } else if (status === 'connecting') {
+                connectBtn.disabled = true;
+            } else {
+                connectBtn.textContent = 'Connect';
+                connectBtn.disabled = false;
+            }
+        }
+
+        function addEvent(container, event, className = '') {
+            const eventEl = document.createElement('div');
+            eventEl.className = `event ${className}`;
+            eventEl.innerHTML = `
+                <div style="font-weight: bold; margin-bottom: 5px;">${new Date().toLocaleTimeString()}</div>
+                <div>${event}</div>
+            `;
+            
+            container.insertBefore(eventEl, container.firstChild);
+            
+            // Keep only last 50 events
+            while (container.children.length > 50) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        function handleTransfers(data) {
+            const transferContainer = document.getElementById('transferEvents');
+            const transfers = JSON.parse(data);
+            
+            transfers.forEach(transfer => {
+                stats.totalTransfers++;
+                if (transfer.side === 'BUY') stats.totalBuys++;
+                if (transfer.side === 'SELL') stats.totalSells++;
+                
+                const eventText = `
+                    <div><strong>${transfer.side}</strong> ${transfer.amount} ${transfer.tokenAddress.slice(0, 8)}...</div>
+                    <div>Wallet: ${transfer.walletAddress.slice(0, 8)}...</div>
+                    <div>Sig: ${transfer.signature.slice(0, 16)}...</div>
+                `;
+                
+                addEvent(transferContainer, eventText, `transfer ${transfer.side.toLowerCase()}`);
+            });
+            
+            updateStats();
+        }
+
+        function handleCoordinated(data) {
+            const coordinatedContainer = document.getElementById('coordinatedEvents');
+            const coordinated = JSON.parse(data);
+            
+            stats.totalCoordinated++;
+            
+            const eventText = `
+                <div><strong>Coordinated Trade Detected!</strong></div>
+                <div>Token: ${coordinated.tokenAddress.slice(0, 8)}...</div>
+                <div>Wallets: ${coordinated.uniqueWalletCount}</div>
+                <div>Window: ${coordinated.coordinatedWindowMinutes || 'Unknown'} min</div>
+            `;
+            
+            addEvent(coordinatedContainer, eventText, 'coordinated');
+            updateStats();
+        }
+
+        function connectToServer() {
+            const serverUrl = document.getElementById('serverUrl').value.trim();
+            if (!serverUrl) {
+                alert('Please enter a server URL');
+                return;
+            }
+
+            setConnectionStatus('connecting', 'Connecting...');
+
+            try {
+                eventSource = new EventSource(`${serverUrl}/stream/all`);
+
+                eventSource.onopen = function() {
+                    setConnectionStatus('connected', `Connected to ${serverUrl}`);
+                    
+                    // Clear existing events
+                    document.getElementById('transferEvents').innerHTML = '';
+                    document.getElementById('coordinatedEvents').innerHTML = '';
+                };
+
+                eventSource.onerror = function(error) {
+                    console.error('SSE Error:', error);
+                    setConnectionStatus('disconnected', 'Connection failed');
+                    if (eventSource) {
+                        eventSource.close();
+                        eventSource = null;
+                    }
+                };
+
+                eventSource.addEventListener('transfers', function(event) {
+                    handleTransfers(event.data);
+                });
+
+                eventSource.addEventListener('coordinated', function(event) {
+                    handleCoordinated(event.data);
+                });
+
+            } catch (error) {
+                console.error('Connection error:', error);
+                setConnectionStatus('disconnected', 'Connection failed');
+            }
+        }
+
+        function disconnectFromServer() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            setConnectionStatus('disconnected', 'Disconnected');
+        }
+
+        function toggleConnection() {
+            if (eventSource) {
+                disconnectFromServer();
+            } else {
+                connectToServer();
+            }
+        }
+
+        // Auto-connect to localhost on page load
+        window.addEventListener('load', function() {
+            // Uncomment the next line to auto-connect
+            // connectToServer();
+        });
+
+        // Load saved server URL
+        const savedUrl = localStorage.getItem('helius-server-url');
+        if (savedUrl) {
+            document.getElementById('serverUrl').value = savedUrl;
+        }
+
+        // Save server URL on change
+        document.getElementById('serverUrl').addEventListener('input', function() {
+            localStorage.setItem('helius-server-url', this.value);
+        });
+    </script>
+</body>
+</html>
