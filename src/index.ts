@@ -14,9 +14,27 @@ const app = express();
 
 // CORS configuration for cross-origin requests
 const corsOptions = {
-  origin: process.env.ALLOWED_ORIGINS 
-    ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-    : '*', // Allow all origins if ALLOWED_ORIGINS is not set
+  origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    const allowedOrigins = process.env.ALLOWED_ORIGINS;
+    
+    // If ALLOWED_ORIGINS is *, allow all origins
+    if (allowedOrigins === '*') {
+      return callback(null, true);
+    }
+    
+    // If ALLOWED_ORIGINS is set and not *, check against the list
+    if (allowedOrigins) {
+      const origins = allowedOrigins.split(',').map(origin => origin.trim());
+      if (origins.includes(origin || '') || !origin) { // !origin allows server-to-server requests
+        return callback(null, true);
+      } else {
+        return callback(new Error('Not allowed by CORS'));
+      }
+    }
+    
+    // Default: allow all origins if ALLOWED_ORIGINS is not set
+    return callback(null, true);
+  },
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-helius-secret'],
   credentials: true,

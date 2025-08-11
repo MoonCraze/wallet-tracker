@@ -152,7 +152,12 @@
         let eventSource = null;
 
         function getApiUrl() {
-            return document.getElementById('apiUrl').value.trim() || 'http://localhost:8080';
+            let url = document.getElementById('apiUrl').value.trim() || 'http://localhost:8080';
+            // Ensure URL ends with / for consistency
+            if (!url.endsWith('/')) {
+                url += '/';
+            }
+            return url;
         }
 
         function showStatus(message, type = 'info') {
@@ -185,17 +190,30 @@
             addLog(`Testing CORS support for: ${apiUrl}`);
 
             try {
-                // Test basic connectivity
-                const response = await fetch(`${apiUrl}/health`, {
+                // First, test with a simple fetch without credentials to avoid preflight complexity
+                const response = await fetch(`${apiUrl}health`, {
                     method: 'GET',
-                    mode: 'cors',
-                    credentials: 'include'
+                    mode: 'cors'
                 });
 
                 if (response.ok) {
                     const data = await response.json();
                     showStatus('✅ CORS is working! Server is accessible.', 'success');
                     addLog(`✅ CORS test successful: ${JSON.stringify(data)}`);
+                    
+                    // Now test with credentials
+                    addLog('Testing with credentials...');
+                    const responseWithCreds = await fetch(`${apiUrl}health`, {
+                        method: 'GET',
+                        mode: 'cors',
+                        credentials: 'include'
+                    });
+                    
+                    if (responseWithCreds.ok) {
+                        addLog('✅ CORS with credentials also working');
+                    } else {
+                        addLog(`⚠️ CORS with credentials failed: ${responseWithCreds.status}`);
+                    }
                 } else {
                     showStatus(`❌ Server responded with ${response.status}`, 'error');
                     addLog(`❌ Server error: ${response.status} ${response.statusText}`);
@@ -204,10 +222,29 @@
                 showStatus('❌ CORS test failed. Check server configuration.', 'error');
                 addLog(`❌ CORS test failed: ${error.message}`);
                 
+                // Add more detailed error information
+                addLog(`Error type: ${error.name}`);
+                addLog(`Full error: ${error.toString()}`);
+                
                 if (error.message.includes('CORS')) {
                     addLog('💡 Tip: Make sure ALLOWED_ORIGINS=* is set in your server environment');
-                } else if (error.message.includes('network')) {
+                } else if (error.message.includes('network') || error.message.includes('fetch')) {
                     addLog('💡 Tip: Check if the server URL is correct and the server is running');
+                    addLog('💡 Tip: If using HTTPS, make sure the SSL certificate is valid');
+                } else if (error.message.includes('ERR_CERT_')) {
+                    addLog('💡 Tip: SSL certificate issue - try HTTP instead or fix the certificate');
+                }
+                
+                // Try a simple connectivity test
+                addLog('Attempting basic connectivity test...');
+                try {
+                    const basicTest = await fetch(`${apiUrl}health`, {
+                        method: 'GET',
+                        mode: 'no-cors'
+                    });
+                    addLog('✅ Basic connectivity works (server is reachable)');
+                } catch (basicError) {
+                    addLog(`❌ Basic connectivity failed: ${basicError.message}`);
                 }
             }
         }
@@ -218,7 +255,7 @@
             addLog('Fetching server configuration...');
 
             try {
-                const response = await fetch(`${apiUrl}/config`, {
+                const response = await fetch(`${apiUrl}config`, {
                     method: 'GET',
                     mode: 'cors',
                     credentials: 'include'
@@ -244,7 +281,7 @@
             addLog('Fetching coordinated trades...');
 
             try {
-                const response = await fetch(`${apiUrl}/dev/db/coordinated?page=1&limit=5`, {
+                const response = await fetch(`${apiUrl}dev/db/coordinated?page=1&limit=5`, {
                     method: 'GET',
                     mode: 'cors',
                     credentials: 'include'
@@ -285,11 +322,11 @@
 
             showStatus('Connecting to real-time stream...', 'info');
             addLog('Starting real-time connection...');
+            addLog(`Connecting to: ${apiUrl}stream/coordinated`);
 
             try {
-                eventSource = new EventSource(`${apiUrl}/stream/coordinated`, {
-                    withCredentials: true
-                });
+                // Try without credentials first for better CORS compatibility
+                eventSource = new EventSource(`${apiUrl}stream/coordinated`);
 
                 eventSource.onopen = () => {
                     showStatus('🔴 Real-time stream connected', 'success');
@@ -298,16 +335,29 @@
 
                 eventSource.onmessage = (event) => {
                     try {
-                        const trade = JSON.parse(event.data);
-                        addLog(`🚨 New coordinated trade: Token ${trade.tokenAddress.slice(0, 8)}... (${trade.uniqueWalletCount} wallets)`);
+                        // Check if it's a keepalive message
+                        if (event.data && event.data.trim()) {
+                            const trade = JSON.parse(event.data);
+                            addLog(`🚨 New coordinated trade: Token ${trade.tokenAddress.slice(0, 8)}... (${trade.uniqueWalletCount} wallets)`);
+                        }
                     } catch (error) {
-                        addLog(`❌ Error parsing real-time data: ${error.message}`);
+                        // Ignore keepalive messages that aren't JSON
+                        if (event.data && event.data.trim() && !event.data.startsWith(':')) {
+                            addLog(`❌ Error parsing real-time data: ${error.message}`);
+                        }
                     }
                 };
 
                 eventSource.onerror = (event) => {
                     showStatus('❌ Real-time connection error', 'error');
                     addLog('❌ Real-time connection error occurred');
+                    addLog(`EventSource readyState: ${eventSource.readyState}`);
+                    
+                    // Provide more detailed error information
+                    if (eventSource.readyState === 2) {
+                        addLog('Connection closed. This might be a CORS issue with SSE.');
+                        addLog('💡 Try opening the API URL directly in a browser to test SSE endpoint');
+                    }
                 };
 
             } catch (error) {

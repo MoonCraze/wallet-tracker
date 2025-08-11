@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SSE CORS Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .log { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        button { padding: 10px 20px; margin: 5px; border: none; border-radius: 4px; cursor: pointer; }
+        .primary { background: #007bff; color: white; }
+        .danger { background: #dc3545; color: white; }
+        input { padding: 8px; width: 400px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <h1>SSE CORS Test</h1>
+    
+    <div>
+        <label>API URL:</label><br>
+        <input type="text" id="apiUrl" value="https://helius.wonderswhisper.com/stream/coordinated" />
+    </div>
+    
+    <div style="margin: 20px 0;">
+        <button class="primary" onclick="testSSE()">Test SSE Connection</button>
+        <button class="danger" onclick="stopSSE()">Stop Connection</button>
+        <button onclick="clearLogs()">Clear Logs</button>
+    </div>
+    
+    <div id="status" class="status info">Ready to test SSE connection</div>
+    
+    <div id="logs"></div>
+
+    <script>
+        let eventSource = null;
+        let logCount = 0;
+
+        function addLog(message, type = 'log') {
+            const logs = document.getElementById('logs');
+            const time = new Date().toLocaleTimeString();
+            logs.innerHTML += `<div class="${type}">[${time}] ${message}</div>`;
+            logs.scrollTop = logs.scrollHeight;
+            logCount++;
+            
+            // Keep only last 50 logs
+            if (logCount > 50) {
+                const firstLog = logs.firstElementChild;
+                if (firstLog) firstLog.remove();
+                logCount--;
+            }
+        }
+
+        function setStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.className = `status ${type}`;
+            status.textContent = message;
+        }
+
+        function testSSE() {
+            const url = document.getElementById('apiUrl').value;
+            
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            addLog(`Testing SSE connection to: ${url}`);
+            setStatus('Connecting...', 'info');
+
+            try {
+                eventSource = new EventSource(url);
+
+                eventSource.onopen = function(event) {
+                    addLog('✅ SSE connection opened successfully');
+                    setStatus('Connected - Waiting for data...', 'success');
+                };
+
+                eventSource.onmessage = function(event) {
+                    const data = event.data.trim();
+                    if (data && !data.startsWith(':')) {
+                        addLog(`📨 Received: ${data}`);
+                        try {
+                            const parsed = JSON.parse(data);
+                            addLog(`🔍 Parsed trade: Token ${parsed.tokenAddress?.slice(0, 8)}... (${parsed.uniqueWalletCount} wallets)`);
+                        } catch (e) {
+                            addLog(`ℹ️ Non-JSON message: ${data}`);
+                        }
+                    } else if (data.startsWith(':')) {
+                        addLog(`💓 Keepalive: ${data}`);
+                    }
+                };
+
+                eventSource.onerror = function(event) {
+                    addLog(`❌ SSE error occurred. ReadyState: ${eventSource.readyState}`);
+                    
+                    switch(eventSource.readyState) {
+                        case 0:
+                            addLog('🔄 Connecting...');
+                            setStatus('Connecting...', 'info');
+                            break;
+                        case 1:
+                            addLog('✅ Connected');
+                            setStatus('Connected', 'success');
+                            break;
+                        case 2:
+                            addLog('❌ Connection closed');
+                            setStatus('Connection closed/failed', 'error');
+                            break;
+                        default:
+                            addLog(`❓ Unknown state: ${eventSource.readyState}`);
+                    }
+                };
+
+            } catch (error) {
+                addLog(`❌ Failed to create EventSource: ${error.message}`, 'error');
+                setStatus('Failed to connect', 'error');
+            }
+        }
+
+        function stopSSE() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+                addLog('⏹️ SSE connection stopped');
+                setStatus('Stopped', 'info');
+            } else {
+                addLog('No active SSE connection to stop');
+            }
+        }
+
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+            logCount = 0;
+            addLog('Logs cleared');
+        }
+
+        // Auto-test on page load if localhost
+        window.onload = function() {
+            const url = document.getElementById('apiUrl').value;
+            if (url.includes('localhost') || url.includes('127.0.0.1')) {
+                addLog('Auto-testing localhost connection...');
+                setTimeout(testSSE, 1000);
+            } else {
+                addLog('Ready to test. Click "Test SSE Connection" to start.');
+            }
+        };
+
+        // Cleanup on page unload
+        window.onbeforeunload = function() {
+            if (eventSource) {
+                eventSource.close();
+            }
+        };
+    </script>
+</body>
+</html>
