@@ -42,6 +42,9 @@ function floorToWindowStart(d: Date): Date {
   return new Date(Math.floor(t / w) * w);
 }
 
+// Serve static files
+app.use(express.static("public"));
+
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 // Config endpoints: GET current config, PATCH to update at runtime
@@ -89,6 +92,90 @@ if (ALLOW_DEV_ENDPOINTS) {
     };
     try { publishCoordinated((req.body && Object.keys(req.body).length) ? req.body : sample); } catch {}
     res.json({ ok: true });
+  });
+  
+  // Simple database viewer endpoints
+  app.get("/dev/db/transfers", async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+      const offset = (page - 1) * limit;
+      
+      const transfers = await prisma.transferEvent.findMany({
+        take: limit,
+        skip: offset,
+        orderBy: { timestamp: 'desc' }
+      });
+      
+      const total = await prisma.transferEvent.count();
+      
+      res.json({
+        transfers,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "database error" });
+    }
+  });
+  
+  app.get("/dev/db/coordinated", async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+      const offset = (page - 1) * limit;
+      
+      const coordinated = await prisma.coordinatedTrade.findMany({
+        take: limit,
+        skip: offset,
+        orderBy: { triggeredAt: 'desc' }
+      });
+      
+      const total = await prisma.coordinatedTrade.count();
+      
+      res.json({
+        coordinated,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "database error" });
+    }
+  });
+  
+  app.get("/dev/db/stats", async (req, res) => {
+    try {
+      const transferCount = await prisma.transferEvent.count();
+      const coordinatedCount = await prisma.coordinatedTrade.count();
+      const buyCount = await prisma.transferEvent.count({ where: { side: 'BUY' } });
+      const sellCount = await prisma.transferEvent.count({ where: { side: 'SELL' } });
+      
+      const recentTransfers = await prisma.transferEvent.findMany({
+        take: 5,
+        orderBy: { timestamp: 'desc' },
+        select: { timestamp: true, walletAddress: true, tokenAddress: true, amount: true, side: true }
+      });
+      
+      res.json({
+        stats: {
+          totalTransfers: transferCount,
+          totalCoordinated: coordinatedCount,
+          totalBuys: buyCount,
+          totalSells: sellCount
+        },
+        recentTransfers
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "database error" });
+    }
   });
 }
 

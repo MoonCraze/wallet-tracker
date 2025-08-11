@@ -79,3 +79,14 @@ npm run db:studio
 - Set DEBUG_EVENTS=1 to see webhook summaries and parsed samples; set DEBUG_EVENTS_VERBOSE=1 to see skip/filter details
 - If Helius sends duplicates or retries, upserts ensure idempotency
 - With DEBUG_EVENTS=1, incoming events are logged to logs/events.ndjson for offline replay
+
+cloudflared tunnel --config cloudflared-config.yml run
+
+# Check everything is running
+.\tunnel.ps1 status
+
+# Start the tunnel (if stopped)
+.\tunnel.ps1 start
+
+# View application logs
+docker-compose --env-file .env.production logs -f
