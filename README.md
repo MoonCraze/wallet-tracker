@@ -92,3 +92,9 @@ cloudflared tunnel --config cloudflared-config.yml run
 docker-compose --env-file .env.production logs -f
 
  docker-compose down; docker-compose up --build -d 
+
+docker compose down; docker compose up --build -d 
+
+ cloudflared tunnel --config cloudflared-config.yml
+
+ cloudflared tunnel --config cloudflared-config.yml run
