@@ -1,4 +1,3 @@
-import { getConfig } from "./config.js";
 // In-memory subscriber lists for SSE
 const transfersClients = new Set();
 const coordinatedClients = new Set();
@@ -76,6 +75,7 @@ export function initRealtime(app, _server) {
         });
     });
 }
+// Helper function to safely write to SSE streams
 function safeWrite(res, chunk) {
     try {
         res.write(chunk);
@@ -88,21 +88,19 @@ function safeWrite(res, chunk) {
 export function publishTransfers(rows) {
     if (rows.length === 0)
         return;
-    // De-duplicate rows based on runtime config (signature-only or wallet|token|signature)
-    const { dedupBySignatureOnly } = getConfig();
+    // De-duplicate rows based on signature only for realtime streaming
     const unique = [];
-    for (const r of rows) {
-        const key = dedupBySignatureOnly
-            ? r.signature
-            : `${r.walletAddress}|${r.tokenAddress}|${r.signature}`;
-        if (markSeen(seenTransfers, key))
-            unique.push(r);
+    const seen = new Set();
+    for (const row of rows) {
+        if (!seen.has(row.signature)) {
+            seen.add(row.signature);
+            unique.push(row);
+        }
     }
     if (unique.length === 0)
         return;
-    // Note: we also keep a client-side dedupe in the demo HTML to avoid re-render on reconnects
     const data = JSON.stringify(unique);
-    // Dedicated stream
+    // Dedicated transfers stream
     for (const res of Array.from(transfersClients)) {
         const ok = safeWrite(res, `data: ${data}\n\n`);
         if (!ok)
@@ -116,10 +114,6 @@ export function publishTransfers(rows) {
     }
 }
 export function publishCoordinated(row) {
-    // Dedup coordinated by token|windowStart
-    const key = `${row.tokenAddress}|${row.windowStart}`;
-    if (!markSeen(seenCoordinated, key))
-        return;
     const data = JSON.stringify(row);
     for (const res of Array.from(coordinatedClients)) {
         const ok = safeWrite(res, `data: ${data}\n\n`);
@@ -131,26 +125,4 @@ export function publishCoordinated(row) {
         if (!ok)
             allClients.delete(res);
     }
-}
-// Simple in-memory LRU-ish de-dupe with bounded size
-const MAX_SEEN = 50_000;
-const seenTransfers = makeSeen();
-const seenCoordinated = makeSeen();
-function makeSeen() {
-    return {
-        set: new Set(),
-        order: [],
-    };
-}
-function markSeen(store, key) {
-    if (store.set.has(key))
-        return false;
-    store.set.add(key);
-    store.order.push(key);
-    if (store.order.length > MAX_SEEN) {
-        const old = store.order.splice(0, store.order.length - MAX_SEEN);
-        for (const k of old)
-            store.set.delete(k);
-    }
-    return true;
 }

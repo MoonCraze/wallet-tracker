@@ -1,100 +1,225 @@
 # Helius Whale Wallet Tracker
 
-Track Solana wallets via Helius Enhanced Webhooks and store results in SQLite using Prisma. Tuned for whale tracking: excludes common tokens (SOL by default) and small transfers (< 1 by default). Fully configurable via .env.
+A production-ready Solana wallet tracking system that processes Helius Enhanced Webhooks to monitor whale transactions and detect coordinated trading patterns.
 
 ## Features
-- Enhanced webhook parser (tokenTransfers, nativeTransfers, accountData)
-- Idempotent persistence with compound unique key
-- In-memory dedup per event and upsert in a single transaction
-- Configurable filters: EXCLUDE_TOKENS and MIN_AMOUNT
-- Optional coarse dedup by signature only
-- NDJSON logging for offline replay and debugging
 
-## Setup
-1) Install deps
-```powershell
-npm i
+- **Real-time Transaction Processing**: Handles Helius webhooks with enhanced parsing for token transfers and native transactions
+- **Coordinated Trade Detection**: Identifies coordinated buying patterns across multiple wallets within configurable time windows
+- **Real-time Streaming**: Server-Sent Events (SSE) for live transaction and coordination data
+- **Production Architecture**: Clean, modular codebase with proper error handling and logging
+- **Configurable Filtering**: Exclude specific tokens and set minimum transaction amounts
+- **Database Persistence**: SQLite with Prisma ORM for reliable data storage
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 18+ 
+- Docker (optional, for containerized deployment)
+
+### Installation
+
+1. **Clone and install dependencies**
+```bash
+git clone <repository-url>
+cd helius-wallet-tracker
+npm install
 ```
 
-2) Configure environment
-```powershell
-Copy-Item .env.example .env
-# Fill HELIUS_API_KEY, WEBHOOK_URL, and adjust filters if needed
+2. **Set up environment variables**
+```bash
+cp .env.example .env
+# Edit .env with your configuration
 ```
 
-Important .env keys:
-- HELIUS_API_KEY: your Helius API key (webhook:update script)
-- WEBHOOK_URL: public https URL to your /helius endpoint (e.g., Cloudflared)
-- WEBHOOK_SECRET: shared secret; verification accepts X-Helius-Secret or Authorization: Bearer <secret>
-- DATABASE_URL: SQLite file (default prisma/dev.db)
-- EXCLUDE_TOKENS: comma-separated mints to ignore (default: WSOL mint for SOL)
-  - To track SOL, set EXCLUDE_TOKENS=""
-- MIN_AMOUNT: minimum abs amount to save (default: 1)
-- DEDUP_BY_SIGNATURE_ONLY: 1 to dedup by signature alone (optional, default 0)
-- DEBUG_EVENTS / DEBUG_EVENTS_VERBOSE: set to 1 for more logs
-
-3) Initialize DB
-```powershell
-npm run db:generate; npm run db:migrate
+3. **Initialize database**
+```bash
+npm run db:generate
+npm run db:migrate
 ```
 
-4) Start the server
-```powershell
+4. **Start development server**
+```bash
 npm run dev
-# or build and run
-npm run build; node dist/index.js
 ```
 
-5) Expose your local server (optional via Cloudflared)
-```powershell
-# Install once: winget install Cloudflare.cloudflared
-cloudflared tunnel login
-cloudflared tunnel run helius-tracker
+## Environment Configuration
+
+### Required Variables
+
+```env
+# Database
+DATABASE_URL="file:./prisma/dev.db"
+
+# Webhook Security
+WEBHOOK_SECRET="your-webhook-secret"
+
+# API Configuration  
+PORT=8080
+NODE_ENV=production
+ALLOWED_ORIGINS="*"
 ```
 
-6) Register/update the Helius webhook
-```powershell
-npm run webhook:update
+### Optional Configuration
+
+```env
+# Transaction Filtering
+EXCLUDE_TOKENS="So11111111111111111111111111111111111111112"  # WSOL mint
+MIN_AMOUNT=1
+
+# Coordinated Trade Detection
+COORDINATED_WINDOW_MINUTES=5
+COORDINATED_MIN_WALLETS=5
+
+# Deduplication
+DEDUP_BY_SIGNATURE_ONLY=false
+
+# Debug Logging
+DEBUG_EVENTS=false
+DEBUG_EVENTS_VERBOSE=false
 ```
 
-7) Inspect DB
-```powershell
-npm run db:studio
+## API Endpoints
+
+### Core Endpoints
+
+- **`GET /health`** - Health check endpoint
+- **`POST /helius`** - Webhook endpoint for Helius events (requires authentication)
+- **`GET /config`** - Get current configuration
+- **`PATCH /config`** - Update configuration at runtime
+
+### Real-time Streams
+
+- **`GET /stream/transfers`** - SSE stream for transfer events
+- **`GET /stream/coordinated`** - SSE stream for coordinated trade events  
+- **`GET /stream/all`** - Combined SSE stream with named events
+
+## Docker Deployment
+
+### Build and run with Docker
+
+```bash
+# Build image
+npm run docker:build
+
+# Run container
+npm run docker:run
 ```
 
-## Scripts
-- npm run dev: start server with tsx watch
-- npm run build: compile TypeScript
-- npm run start: run compiled server
-- npm run db:generate / db:migrate / db:studio: Prisma workflow
-- npm run webhook:update: create/update Helius enhanced webhook (uses wallets.json)
-- npm run replay: reprocess logs/events.ndjson using the same parser and filters
+### Docker Compose
 
-## Filters and dedup behavior
-- Default excludes SOL (WSOL mint), so only SPL tokens are saved unless you override EXCLUDE_TOKENS
-- Default MIN_AMOUNT=1 skips dust; set to higher values for whales
-- Dedup within each payload by (walletAddress, tokenAddress, signature). Enable DEDUP_BY_SIGNATURE_ONLY=1 to dedup more aggressively by signature
+```bash
+# Start with production environment
+docker-compose --env-file .env.production up -d
 
-## Troubleshooting
-- Set DEBUG_EVENTS=1 to see webhook summaries and parsed samples; set DEBUG_EVENTS_VERBOSE=1 to see skip/filter details
-- If Helius sends duplicates or retries, upserts ensure idempotency
-- With DEBUG_EVENTS=1, incoming events are logged to logs/events.ndjson for offline replay
+# View logs
+npm run prod:logs
 
-cloudflared tunnel --config cloudflared-config.yml run
+# Stop services
+npm run prod:stop
+```
 
-# Check everything is running
-.\tunnel.ps1 status
+## Architecture
 
-# Start the tunnel (if stopped)
-.\tunnel.ps1 start
+```
+src/
+├── app.ts                 # Application entry point
+├── lib/
+│   ├── env.ts            # Environment validation
+│   └── logger.ts         # Centralized logging
+├── middleware/
+│   ├── auth.ts           # Authentication middleware
+│   └── error.ts          # Error handling
+├── controllers/
+│   ├── webhook.ts        # Webhook request handlers
+│   ├── config.ts         # Configuration management
+│   └── health.ts         # Health check
+├── services/
+│   ├── webhook.ts        # Core webhook processing logic
+│   └── coordinator.ts    # Background coordinated trade scanner
+├── routes/
+│   ├── webhook.ts        # Webhook routing
+│   ├── config.ts         # Configuration routing
+│   └── health.ts         # Health check routing
+├── utils/
+│   └── parse.ts          # Helius event parsing
+├── config.ts             # Runtime configuration management
+├── db.ts                 # Database connection
+├── realtime.ts           # SSE streaming functionality
+├── types.ts              # TypeScript type definitions
+├── verify.ts             # Webhook verification
+└── wallets.json          # Tracked wallet addresses
+```
 
-# View application logs
-docker-compose --env-file .env.production logs -f
+## Key Features
 
- docker-compose down; docker-compose up --build -d 
+### Coordinated Trade Detection
 
-docker compose down; docker compose up --build -d 
+The system monitors for coordinated buying patterns by:
+1. Tracking BUY transactions within sliding time windows
+2. Counting unique wallets participating in token purchases
+3. Triggering alerts when wallet count exceeds threshold
+4. Broadcasting coordinated trade events via SSE
 
- cloudflared tunnel --config cloudflared-config.yml
+### Real-time Processing
 
- cloudflared tunnel --config cloudflared-config.yml run
+- **Webhook Processing**: Handles Helius enhanced webhooks with proper authentication
+- **Event Streaming**: Real-time SSE streams for transfers and coordinated trades
+- **Background Scanning**: Continuous monitoring for missed coordination patterns
+
+### Production Features
+
+- **Environment Validation**: Strict validation of all environment variables
+- **Error Handling**: Comprehensive error handling with proper HTTP status codes
+- **Logging**: Structured logging with configurable debug levels
+- **Graceful Shutdown**: Proper cleanup of resources and background processes
+- **Health Checks**: Built-in health endpoints for monitoring
+
+## Database Schema
+
+The system uses two main tables:
+
+- **`TransferEvent`**: Individual token transfer records
+- **`CoordinatedTrade`**: Detected coordination patterns with wallet lists
+
+## Security
+
+- Webhook signature verification using `x-helius-secret` header
+- CORS configuration for cross-origin requests
+- Input validation and sanitization
+- Non-root user in Docker container
+
+## Monitoring
+
+The application provides several monitoring capabilities:
+
+- Health check endpoint (`/health`)
+- Structured logging with timestamps
+- Real-time event streaming for observability
+- Configurable debug logging levels
+
+## Development
+
+### Project Scripts
+
+```bash
+npm run dev          # Start development server with auto-reload
+npm run build        # Build TypeScript to JavaScript
+npm run start        # Start production server
+npm run db:generate  # Generate Prisma client
+npm run db:migrate   # Run database migrations
+npm run db:studio    # Open Prisma Studio
+```
+
+### Adding New Features
+
+1. Follow the established architecture patterns
+2. Add proper error handling and logging
+3. Include TypeScript types
+4. Update environment validation if needed
+5. Add appropriate tests
+
+## License
+
+This project is licensed under the MIT License.

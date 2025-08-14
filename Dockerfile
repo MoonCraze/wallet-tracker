@@ -13,7 +13,6 @@ RUN npm ci
 # Copy source code
 COPY src/ ./src/
 COPY prisma/ ./prisma/
-COPY public/ ./public/
 
 # Generate Prisma client
 RUN npx prisma generate
@@ -44,7 +43,6 @@ COPY --from=builder /app/dist ./dist/
 COPY --from=builder /app/node_modules ./node_modules/
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma ./prisma/
-COPY --from=builder /app/public ./public/
 COPY --from=builder /app/src/wallets.json ./dist/
 
 # Create data directory for SQLite
@@ -64,4 +62,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 ENTRYPOINT ["dumb-init", "--"]
 
 # Start the application
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/app.js"]

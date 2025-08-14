@@ -1,6 +1,6 @@
 import type { Express, Response, Request } from "express";
 import type { Server as HttpServer } from "node:http";
-import { getConfig } from "./config.js";
+import { Logger } from "./lib/logger.js";
 
 export type TransferBroadcast = {
   walletAddress: string;
@@ -100,7 +100,8 @@ export function initRealtime(app: Express, _server?: HttpServer) {
   });
 }
 
-function safeWrite(res: Response, chunk: string) {
+// Helper function to safely write to SSE streams
+function safeWrite(res: Response, chunk: string): boolean {
   try {
     res.write(chunk);
     return true;
@@ -111,23 +112,28 @@ function safeWrite(res: Response, chunk: string) {
 
 export function publishTransfers(rows: TransferBroadcast[]) {
   if (rows.length === 0) return;
-  // De-duplicate rows based on runtime config (signature-only or wallet|token|signature)
-  const { dedupBySignatureOnly } = getConfig();
+  
+  // De-duplicate rows based on signature only for realtime streaming
   const unique: TransferBroadcast[] = [];
-  for (const r of rows) {
-    const key = dedupBySignatureOnly
-      ? r.signature
-      : `${r.walletAddress}|${r.tokenAddress}|${r.signature}`;
-    if (markSeen(seenTransfers, key)) unique.push(r);
+  const seen = new Set<string>();
+  
+  for (const row of rows) {
+    if (!seen.has(row.signature)) {
+      seen.add(row.signature);
+      unique.push(row);
+    }
   }
+  
   if (unique.length === 0) return;
-  // Note: we also keep a client-side dedupe in the demo HTML to avoid re-render on reconnects
+
   const data = JSON.stringify(unique);
-  // Dedicated stream
+  
+  // Dedicated transfers stream
   for (const res of Array.from(transfersClients)) {
     const ok = safeWrite(res, `data: ${data}\n\n`);
     if (!ok) transfersClients.delete(res);
   }
+  
   // Combined stream with named event
   for (const res of Array.from(allClients)) {
     const ok = safeWrite(res, `event: transfers\n` + `data: ${data}\n\n`);
@@ -136,39 +142,15 @@ export function publishTransfers(rows: TransferBroadcast[]) {
 }
 
 export function publishCoordinated(row: CoordinatedBroadcast) {
-  // Dedup coordinated by token|windowStart
-  const key = `${row.tokenAddress}|${row.windowStart}`;
-  if (!markSeen(seenCoordinated, key)) return;
   const data = JSON.stringify(row);
+  
   for (const res of Array.from(coordinatedClients)) {
     const ok = safeWrite(res, `data: ${data}\n\n`);
     if (!ok) coordinatedClients.delete(res);
   }
+  
   for (const res of Array.from(allClients)) {
     const ok = safeWrite(res, `event: coordinated\n` + `data: ${data}\n\n`);
     if (!ok) allClients.delete(res);
   }
-}
-
-// Simple in-memory LRU-ish de-dupe with bounded size
-const MAX_SEEN = 50_000;
-const seenTransfers = makeSeen();
-const seenCoordinated = makeSeen();
-
-function makeSeen() {
-  return {
-    set: new Set<string>(),
-    order: [] as string[],
-  };
-}
-
-function markSeen(store: { set: Set<string>; order: string[] }, key: string): boolean {
-  if (store.set.has(key)) return false;
-  store.set.add(key);
-  store.order.push(key);
-  if (store.order.length > MAX_SEEN) {
-    const old = store.order.splice(0, store.order.length - MAX_SEEN);
-    for (const k of old) store.set.delete(k);
-  }
-  return true;
 }
