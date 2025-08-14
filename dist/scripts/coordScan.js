@@ -9,51 +9,58 @@ function floorToWindowStart(d) {
 }
 async function main() {
     const now = new Date();
-    const start = new Date(now.getTime() - WINDOW_MS);
-    const end = now;
+    // Use a fixed window approach: align to WINDOW_MS boundaries
+    const currentWindowStart = floorToWindowStart(now);
+    const windowStart = new Date(currentWindowStart.getTime() - WINDOW_MS);
+    const windowEnd = currentWindowStart;
+    console.log(`[coord/scan] scanning window: ${windowStart.toISOString()} to ${windowEnd.toISOString()}`);
+    // Check if we already processed this window (prevent duplicate processing)
+    const existingWindowCheck = await prisma.coordinatedTrade.findFirst({
+        where: { windowStart },
+        select: { id: true },
+    });
+    if (existingWindowCheck) {
+        console.log(`[coord/scan] window already processed, skipping`);
+        return;
+    }
     const tokens = await prisma.transferEvent.findMany({
-        where: { side: "BUY", timestamp: { gte: start, lt: end } },
+        where: { side: "BUY", timestamp: { gte: windowStart, lt: windowEnd } },
         select: { tokenAddress: true },
         distinct: ["tokenAddress"],
     });
+    console.log(`[coord/scan] found ${tokens.length} unique tokens with BUY activity`);
     for (const t of tokens) {
         const buyers = await prisma.transferEvent.findMany({
-            where: { tokenAddress: t.tokenAddress, side: "BUY", timestamp: { gte: start, lt: end } },
+            where: {
+                tokenAddress: t.tokenAddress,
+                side: "BUY",
+                timestamp: { gte: windowStart, lt: windowEnd }
+            },
             select: { walletAddress: true },
             distinct: ["walletAddress"],
         });
         const uniq = buyers.map((b) => b.walletAddress);
         if (uniq.length >= COORDINATED_MIN_WALLETS) {
-            const windowStart = floorToWindowStart(start);
-            const windowEnd = new Date(windowStart.getTime() + WINDOW_MS);
+            // Check if this token already has an entry for this exact window
             const existing = await prisma.coordinatedTrade.findFirst({
                 where: { tokenAddress: t.tokenAddress, windowStart },
                 select: { id: true },
             });
             if (existing) {
-                await prisma.coordinatedTrade.update({
-                    where: { id: existing.id },
-                    data: {
-                        uniqueWalletCount: uniq.length,
-                        walletAddresses: JSON.stringify(uniq),
-                        windowEnd,
-                        triggeredAt: now,
-                    },
-                });
+                console.log(`[coord/scan] token=${t.tokenAddress} already has entry for this window, skipping`);
+                continue;
             }
-            else {
-                await prisma.coordinatedTrade.create({
-                    data: {
-                        tokenAddress: t.tokenAddress,
-                        windowStart,
-                        windowEnd,
-                        triggeredAt: now,
-                        uniqueWalletCount: uniq.length,
-                        walletAddresses: JSON.stringify(uniq),
-                    },
-                });
-            }
-            console.log(`[coord/scan] token=${t.tokenAddress} wallets=${uniq.length}`);
+            await prisma.coordinatedTrade.create({
+                data: {
+                    tokenAddress: t.tokenAddress,
+                    windowStart,
+                    windowEnd,
+                    triggeredAt: now,
+                    uniqueWalletCount: uniq.length,
+                    walletAddresses: JSON.stringify(uniq),
+                },
+            });
+            console.log(`[coord/scan] token=${t.tokenAddress} wallets=${uniq.length} window=${windowStart.toISOString()}`);
         }
     }
 }

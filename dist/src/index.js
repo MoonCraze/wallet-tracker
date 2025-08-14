@@ -380,39 +380,49 @@ app.post("/helius", express.json({ limit: "10mb", type: ["application/json", "ap
         if (DEBUG_EVENTS() && (!events || events.length === 0)) {
             console.log("[webhook] received empty events array");
         }
-        // Check coordinated buys per touched token
+        // Check coordinated buys per touched token using fixed time windows
         const now = new Date();
-        const start = new Date(now.getTime() - WINDOW_MS());
-        const windowStart = floorToWindowStart(now);
-        const windowEnd = new Date(windowStart.getTime() + WINDOW_MS());
+        const currentWindowStart = floorToWindowStart(now);
+        const windowStart = new Date(currentWindowStart.getTime() - WINDOW_MS());
+        const windowEnd = currentWindowStart;
+        if (DEBUG_EVENTS()) {
+            console.log(`[coord] checking window: ${windowStart.toISOString()} to ${windowEnd.toISOString()}`);
+        }
         for (const tokenAddress of touchedTokens) {
-            const rows = await prisma.transferEvent.findMany({ where: { tokenAddress, side: "BUY", timestamp: { gte: start, lt: now } }, select: { walletAddress: true } });
+            const rows = await prisma.transferEvent.findMany({
+                where: { tokenAddress, side: "BUY", timestamp: { gte: windowStart, lt: windowEnd } },
+                select: { walletAddress: true }
+            });
             const uniq = Array.from(new Set(rows.map(r => r.walletAddress))).sort();
             if (uniq.length >= COORDINATED_MIN_WALLETS()) {
                 try {
-                    const existing = await prisma.coordinatedTrade.findFirst({ where: { tokenAddress, windowStart }, select: { id: true } });
+                    // Check if this exact window was already processed for this token
+                    const existing = await prisma.coordinatedTrade.findFirst({
+                        where: { tokenAddress, windowStart },
+                        select: { id: true }
+                    });
                     if (existing) {
-                        const updated = await prisma.coordinatedTrade.update({
-                            where: { id: existing.id },
-                            data: { uniqueWalletCount: uniq.length, walletAddresses: JSON.stringify(uniq), windowEnd, triggeredAt: now },
-                        });
-                        try {
-                            publishCoordinated({ tokenAddress, windowStart: windowStart.toISOString(), windowEnd: windowEnd.toISOString(), triggeredAt: now.toISOString(), uniqueWalletCount: updated.uniqueWalletCount, walletAddresses: JSON.parse(updated.walletAddresses || "[]") });
+                        if (DEBUG_EVENTS()) {
+                            console.log(`[coord] token=${tokenAddress} already processed for window ${windowStart.toISOString()}, skipping`);
                         }
-                        catch (e) {
-                            if (DEBUG_EVENTS())
-                                console.warn("[sse] coordinated broadcast failed", e);
-                        }
+                        continue;
                     }
-                    else {
-                        const created = await prisma.coordinatedTrade.create({ data: { tokenAddress, windowStart, windowEnd, triggeredAt: now, uniqueWalletCount: uniq.length, walletAddresses: JSON.stringify(uniq) } });
-                        try {
-                            publishCoordinated({ tokenAddress, windowStart: windowStart.toISOString(), windowEnd: windowEnd.toISOString(), triggeredAt: now.toISOString(), uniqueWalletCount: created.uniqueWalletCount, walletAddresses: JSON.parse(created.walletAddresses || "[]") });
-                        }
-                        catch (e) {
-                            if (DEBUG_EVENTS())
-                                console.warn("[sse] coordinated broadcast failed", e);
-                        }
+                    const created = await prisma.coordinatedTrade.create({
+                        data: { tokenAddress, windowStart, windowEnd, triggeredAt: now, uniqueWalletCount: uniq.length, walletAddresses: JSON.stringify(uniq) }
+                    });
+                    try {
+                        publishCoordinated({
+                            tokenAddress,
+                            windowStart: windowStart.toISOString(),
+                            windowEnd: windowEnd.toISOString(),
+                            triggeredAt: now.toISOString(),
+                            uniqueWalletCount: created.uniqueWalletCount,
+                            walletAddresses: JSON.parse(created.walletAddresses || "[]")
+                        });
+                    }
+                    catch (e) {
+                        if (DEBUG_EVENTS())
+                            console.warn("[sse] coordinated broadcast failed", e);
                     }
                     if (DEBUG_EVENTS())
                         console.log("[coord] detected coordinated BUY:", { token: tokenAddress, windowStart: windowStart.toISOString(), count: uniq.length });
@@ -462,79 +472,75 @@ server.listen(PORT, () => {
     const scan = async () => {
         try {
             const now = new Date();
-            const start = new Date(now.getTime() - WINDOW_MS());
-            const end = now;
+            const currentWindowStart = floorToWindowStart(now);
+            const windowStart = new Date(currentWindowStart.getTime() - WINDOW_MS());
+            const windowEnd = currentWindowStart;
+            if (DEBUG_EVENTS()) {
+                console.log(`[coord/bg] scanning window: ${windowStart.toISOString()} to ${windowEnd.toISOString()}`);
+            }
+            // Check if we already processed this window (prevent duplicate processing)
+            const existingWindowCheck = await prisma.coordinatedTrade.findFirst({
+                where: { windowStart },
+                select: { id: true },
+            });
+            if (existingWindowCheck) {
+                if (DEBUG_EVENTS()) {
+                    console.log(`[coord/bg] window already processed, skipping`);
+                }
+                return;
+            }
             // Find tokens with BUYs in the window
             const tokenRows = await prisma.transferEvent.findMany({
-                where: { side: "BUY", timestamp: { gte: start, lt: end } },
+                where: { side: "BUY", timestamp: { gte: windowStart, lt: windowEnd } },
                 select: { tokenAddress: true },
                 distinct: ["tokenAddress"],
             });
+            if (DEBUG_EVENTS() && tokenRows.length > 0) {
+                console.log(`[coord/bg] found ${tokenRows.length} unique tokens with BUY activity`);
+            }
             for (const tr of tokenRows) {
                 const token = tr.tokenAddress;
                 const buyers = await prisma.transferEvent.findMany({
-                    where: { tokenAddress: token, side: "BUY", timestamp: { gte: start, lt: end } },
+                    where: { tokenAddress: token, side: "BUY", timestamp: { gte: windowStart, lt: windowEnd } },
                     select: { walletAddress: true },
                     distinct: ["walletAddress"],
                 });
                 const uniq = buyers.map(b => b.walletAddress);
                 if (uniq.length >= COORDINATED_MIN_WALLETS()) {
-                    const windowStart = floorToWindowStart(start);
-                    const windowEnd = new Date(windowStart.getTime() + WINDOW_MS());
+                    // Check if this token already has an entry for this exact window
                     const existing = await prisma.coordinatedTrade.findFirst({
                         where: { tokenAddress: token, windowStart },
                         select: { id: true },
                     });
                     if (existing) {
-                        const updated = await prisma.coordinatedTrade.update({
-                            where: { id: existing.id },
-                            data: {
-                                uniqueWalletCount: uniq.length,
-                                walletAddresses: JSON.stringify(uniq),
-                                windowEnd,
-                                triggeredAt: now,
-                            },
-                        });
-                        try {
-                            publishCoordinated({
-                                tokenAddress: token,
-                                windowStart: windowStart.toISOString(),
-                                windowEnd: windowEnd.toISOString(),
-                                triggeredAt: now.toISOString(),
-                                uniqueWalletCount: updated.uniqueWalletCount,
-                                walletAddresses: JSON.parse(updated.walletAddresses || "[]"),
-                            });
+                        if (DEBUG_EVENTS()) {
+                            console.log(`[coord/bg] token=${token} already has entry for this window, skipping`);
                         }
-                        catch (e) {
-                            if (DEBUG_EVENTS())
-                                console.warn("[sse] coordinated broadcast failed", e);
-                        }
+                        continue;
                     }
-                    else {
-                        const created = await prisma.coordinatedTrade.create({
-                            data: {
-                                tokenAddress: token,
-                                windowStart,
-                                windowEnd,
-                                triggeredAt: now,
-                                uniqueWalletCount: uniq.length,
-                                walletAddresses: JSON.stringify(uniq),
-                            },
+                    const created = await prisma.coordinatedTrade.create({
+                        data: {
+                            tokenAddress: token,
+                            windowStart,
+                            windowEnd,
+                            triggeredAt: now,
+                            uniqueWalletCount: uniq.length,
+                            walletAddresses: JSON.stringify(uniq),
+                        },
+                    });
+                    try {
+                        publishCoordinated({
+                            tokenAddress: token,
+                            windowStart: windowStart.toISOString(),
+                            windowEnd: windowEnd.toISOString(),
+                            triggeredAt: now.toISOString(),
+                            uniqueWalletCount: created.uniqueWalletCount,
+                            walletAddresses: JSON.parse(created.walletAddresses || "[]"),
                         });
-                        try {
-                            publishCoordinated({
-                                tokenAddress: token,
-                                windowStart: windowStart.toISOString(),
-                                windowEnd: windowEnd.toISOString(),
-                                triggeredAt: now.toISOString(),
-                                uniqueWalletCount: created.uniqueWalletCount,
-                                walletAddresses: JSON.parse(created.walletAddresses || "[]"),
-                            });
-                        }
-                        catch (e) {
-                            if (DEBUG_EVENTS())
-                                console.warn("[sse] coordinated broadcast failed", e);
-                        }
+                    }
+                    catch (e) {
+                        if (DEBUG_EVENTS())
+                            console.warn("[sse] coordinated broadcast failed", e);
                     }
                     if (DEBUG_EVENTS()) {
                         console.log("[coord/bg] coordinated BUY:", {
