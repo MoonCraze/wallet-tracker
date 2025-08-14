@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Helius Wallet Tracker - Endpoint Testing</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .main-content {
+            padding: 30px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        .section {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
+        }
+
+        .section h2 {
+            color: #374151;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section h2::before {
+            content: "🔧";
+            font-size: 1.2rem;
+        }
+
+        .streams h2::before {
+            content: "📡";
+        }
+
+        .button-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn.success {
+            background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+        }
+
+        .btn.warning {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        .btn.danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        .response-area {
+            background: #f8fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            line-height: 1.5;
+        }
+
+        .stream-area {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.8rem;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 2px solid #334155;
+        }
+
+        .stream-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-connected {
+            background: #10b981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+        }
+
+        .status-disconnected {
+            background: #ef4444;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .webhook-form {
+            grid-column: 1 / -1;
+        }
+
+        .event-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 4px solid #3b82f6;
+            border-radius: 4px;
+        }
+
+        .event-timestamp {
+            color: #6b7280;
+            font-size: 0.75rem;
+        }
+
+        .error {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+            border-left-color: #ef4444;
+        }
+
+        .success {
+            color: #10b981;
+            background: rgba(16, 185, 129, 0.1);
+            border-left-color: #10b981;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .button-group {
+                flex-direction: column;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🐋 Helius Wallet Tracker</h1>
+            <p>Comprehensive endpoint testing interface</p>
+        </div>
+
+        <div class="main-content">
+            <!-- API Endpoints Section -->
+            <div class="section">
+                <h2>API Endpoints</h2>
+                
+                <div class="button-group">
+                    <button class="btn success" onclick="testHealth()">Health Check</button>
+                    <button class="btn" onclick="getConfig()">Get Config</button>
+                    <button class="btn warning" onclick="getRecentTransfers()">Recent Transfers</button>
+                    <button class="btn warning" onclick="getCoordinatedTrades()">Coordinated Trades</button>
+                    <button class="btn" onclick="getDbStats()">Database Stats</button>
+                </div>
+
+                <div class="form-group">
+                    <label for="baseUrl">Base URL:</label>
+                    <input type="text" id="baseUrl" value="https://helius.wonderswhisper.com" placeholder="https://your-domain.com">
+                </div>
+
+                <div id="apiResponse" class="response-area">Ready to test endpoints...</div>
+            </div>
+
+            <!-- Real-time Streams Section -->
+            <div class="section streams">
+                <h2>Real-time Streams</h2>
+                
+                <div class="stream-controls">
+                    <button class="btn" onclick="connectTransfers()">
+                        <span class="status-indicator" id="transfersStatus"></span>
+                        Transfers Stream
+                    </button>
+                    <button class="btn" onclick="connectCoordinated()">
+                        <span class="status-indicator" id="coordinatedStatus"></span>
+                        Coordinated Trades
+                    </button>
+                    <button class="btn" onclick="connectAll()">
+                        <span class="status-indicator" id="allStatus"></span>
+                        All Events (Named)
+                    </button>
+                    <button class="btn danger" onclick="disconnectAll()">Disconnect All</button>
+                </div>
+
+                <div id="streamOutput" class="stream-area">Waiting for stream connections...</div>
+            </div>
+
+            <!-- Configuration Update Section -->
+            <div class="section">
+                <h2>Configuration Management</h2>
+                
+                <div class="form-group">
+                    <label for="configField">Configuration Field:</label>
+                    <select id="configField" onchange="updateConfigInputType()">
+                        <option value="minAmount">MIN_AMOUNT (number)</option>
+                        <option value="coordinatedWindowMinutes">COORDINATED_WINDOW_MINUTES (number)</option>
+                        <option value="coordinatedMinWallets">COORDINATED_MIN_WALLETS (number)</option>
+                        <option value="debugEvents">DEBUG_EVENTS (boolean)</option>
+                        <option value="debugEventsVerbose">DEBUG_EVENTS_VERBOSE (boolean)</option>
+                        <option value="dedupBySignatureOnly">DEDUP_BY_SIGNATURE_ONLY (boolean)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="configValue">New Value:</label>
+                    <input type="text" id="configValue" placeholder="Enter new value">
+                    <div id="configHelp" style="font-size: 0.8rem; color: #6b7280; margin-top: 5px;">
+                        Enter numeric values for numbers, true/false for booleans
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn warning" onclick="updateConfig()">Update Configuration</button>
+                    <button class="btn" onclick="getCurrentConfig()">Refresh Current Config</button>
+                </div>
+
+                <div id="configResponse" class="response-area">Configuration updates will appear here...</div>
+            </div>
+
+            <!-- Token Management Section -->
+            <div class="section">
+                <h2>🚫 Exclude Tokens Management</h2>
+                
+                <div class="button-group">
+                    <button class="btn" onclick="getExcludeTokens()">Get Exclude Tokens</button>
+                </div>
+
+                <div class="form-group">
+                    <label for="tokenAddress">Token Address:</label>
+                    <input type="text" id="tokenAddress" placeholder="Enter token mint address (e.g., EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v)">
+                </div>
+
+                <div class="button-group">
+                    <button class="btn warning" onclick="addExcludeToken()">Add to Exclude List</button>
+                    <button class="btn danger" onclick="removeExcludeToken()">Remove from Exclude List</button>
+                </div>
+
+                <div id="tokenResponse" class="response-area">Token management results will appear here...</div>
+            </div>
+
+            <!-- Webhook Testing Section -->
+            <div class="section webhook-form">
+                <h2>🎯 Webhook Testing</h2>
+                
+                <div class="form-group">
+                    <label for="webhookSecret">Webhook Secret:</label>
+                    <input type="password" id="webhookSecret" value="super-secret-production-key" placeholder="Enter webhook secret">
+                </div>
+
+                <div class="form-group">
+                    <label for="webhookPayload">Test Payload (JSON):</label>
+                    <textarea id="webhookPayload" rows="8" placeholder="Enter webhook payload JSON">[
+  {
+    "type": "TRANSFER",
+    "source": "SYSTEM_PROGRAM",
+    "timestamp": 1723631234,
+    "slot": 123456789,
+    "signature": "test_signature_123",
+    "tokenTransfers": [
+      {
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "tokenAmount": {
+          "amount": "1000000",
+          "decimals": 6,
+          "uiAmount": 1.0
+        },
+        "fromUserAccount": "DemoFromWallet123456789",
+        "toUserAccount": "DemoToWallet987654321"
+      }
+    ],
+    "accountData": [
+      {
+        "account": "DemoFromWallet123456789",
+        "nativeBalanceChange": -5000
+      }
+    ]
+  }
+]</textarea>
+                </div>
+
+                <button class="btn" onclick="sendWebhook()">Send Test Webhook</button>
+
+                <div id="webhookResponse" class="response-area">Webhook responses will appear here...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let transfersEventSource = null;
+        let coordinatedEventSource = null;
+        let allEventSource = null;
+        let streamOutput = document.getElementById('streamOutput');
+
+        function getBaseUrl() {
+            return document.getElementById('baseUrl').value.replace(/\/$/, '');
+        }
+
+        function updateApiResponse(content, isError = false) {
+            const responseArea = document.getElementById('apiResponse');
+            const timestamp = new Date().toLocaleTimeString();
+            responseArea.textContent = `[${timestamp}] ${content}`;
+            responseArea.style.color = isError ? '#ef4444' : '#374151';
+        }
+
+        function updateStreamOutput(content, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const eventDiv = document.createElement('div');
+            eventDiv.className = `event-item ${type}`;
+            eventDiv.innerHTML = `
+                <div class="event-timestamp">[${timestamp}]</div>
+                <div>${content}</div>
+            `;
+            streamOutput.appendChild(eventDiv);
+            streamOutput.scrollTop = streamOutput.scrollHeight;
+        }
+
+        async function testHealth() {
+            try {
+                updateApiResponse('Testing health endpoint...');
+                const response = await fetch(`${getBaseUrl()}/health`);
+                const data = await response.json();
+                updateApiResponse(`Health Check: ${JSON.stringify(data, null, 2)}`);
+            } catch (error) {
+                updateApiResponse(`Health Check Error: ${error.message}`, true);
+            }
+        }
+
+        async function getConfig() {
+            try {
+                updateApiResponse('Getting configuration...');
+                const response = await fetch(`${getBaseUrl()}/config`);
+                const data = await response.json();
+                updateApiResponse(`Configuration: ${JSON.stringify(data, null, 2)}`);
+            } catch (error) {
+                updateApiResponse(`Config Error: ${error.message}`, true);
+            }
+        }
+
+        async function getRecentTransfers() {
+            try {
+                updateApiResponse('Getting recent transfers...');
+                const response = await fetch(`${getBaseUrl()}/dev/db/transfers?limit=10`);
+                const data = await response.json();
+                updateApiResponse(`Recent Transfers: ${JSON.stringify(data, null, 2)}`);
+            } catch (error) {
+                updateApiResponse(`Transfers Error: ${error.message}`, true);
+            }
+        }
+
+        async function getCoordinatedTrades() {
+            try {
+                updateApiResponse('Getting recent coordinated trades...');
+                const response = await fetch(`${getBaseUrl()}/dev/db/coordinated?limit=5`);
+                const data = await response.json();
+                updateApiResponse(`Coordinated Trades: ${JSON.stringify(data, null, 2)}`);
+            } catch (error) {
+                updateApiResponse(`Coordinated Trades Error: ${error.message}`, true);
+            }
+        }
+
+        async function getDbStats() {
+            try {
+                updateApiResponse('Getting database statistics...');
+                const response = await fetch(`${getBaseUrl()}/dev/db/stats`);
+                const data = await response.json();
+                updateApiResponse(`Database Stats: ${JSON.stringify(data, null, 2)}`);
+            } catch (error) {
+                updateApiResponse(`Database Stats Error: ${error.message}`, true);
+            }
+        }
+
+        async function getExcludeTokens() {
+            try {
+                const response = await fetch(`${getBaseUrl()}/config/exclude-tokens`);
+                const data = await response.json();
+                document.getElementById('tokenResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Exclude Tokens: ${JSON.stringify(data, null, 2)}`;
+            } catch (error) {
+                document.getElementById('tokenResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Error: ${error.message}`;
+            }
+        }
+
+        async function addExcludeToken() {
+            try {
+                const tokenAddress = document.getElementById('tokenAddress').value.trim();
+                
+                if (!tokenAddress) {
+                    alert('Please enter a token address');
+                    return;
+                }
+
+                if (tokenAddress.length !== 44) {
+                    alert('Token address should be 44 characters long');
+                    return;
+                }
+
+                const response = await fetch(`${getBaseUrl()}/config/exclude-tokens`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ tokenAddress })
+                });
+
+                const data = await response.json();
+                document.getElementById('tokenResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Add Token: ${JSON.stringify(data, null, 2)}`;
+                    
+                // Clear the input
+                document.getElementById('tokenAddress').value = '';
+            } catch (error) {
+                document.getElementById('tokenResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Add Error: ${error.message}`;
+            }
+        }
+
+        async function removeExcludeToken() {
+            try {
+                const tokenAddress = document.getElementById('tokenAddress').value.trim();
+                
+                if (!tokenAddress) {
+                    alert('Please enter a token address');
+                    return;
+                }
+
+                const response = await fetch(`${getBaseUrl()}/config/exclude-tokens/${encodeURIComponent(tokenAddress)}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+                document.getElementById('tokenResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Remove Token: ${JSON.stringify(data, null, 2)}`;
+                    
+                // Clear the input
+                document.getElementById('tokenAddress').value = '';
+            } catch (error) {
+                document.getElementById('tokenResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Remove Error: ${error.message}`;
+            }
+        }
+
+        function updateConfigInputType() {
+            const field = document.getElementById('configField').value;
+            const valueInput = document.getElementById('configValue');
+            const helpText = document.getElementById('configHelp');
+            
+            if (field.includes('Amount') || field.includes('Window') || field.includes('Wallets')) {
+                valueInput.placeholder = 'Enter a number (e.g., 10)';
+                helpText.textContent = 'Enter a numeric value';
+            } else if (field.includes('debug') || field.includes('dedup')) {
+                valueInput.placeholder = 'Enter true or false';
+                helpText.textContent = 'Enter boolean value: true or false';
+            } else {
+                valueInput.placeholder = 'Enter new value';
+                helpText.textContent = 'Enter the appropriate value for this field';
+            }
+        }
+
+        async function getCurrentConfig() {
+            try {
+                const response = await fetch(`${getBaseUrl()}/config`);
+                const data = await response.json();
+                document.getElementById('configResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Current Config: ${JSON.stringify(data, null, 2)}`;
+            } catch (error) {
+                document.getElementById('configResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Config Error: ${error.message}`;
+            }
+        }
+
+        async function updateConfig() {
+            try {
+                const field = document.getElementById('configField').value;
+                let value = document.getElementById('configValue').value;
+                
+                if (!value) {
+                    alert('Please enter a value');
+                    return;
+                }
+
+                // Convert value to appropriate type
+                let convertedValue;
+                if (field.includes('Amount') || field.includes('Window') || field.includes('Wallets')) {
+                    convertedValue = parseInt(value);
+                    if (isNaN(convertedValue)) {
+                        alert('Please enter a valid number');
+                        return;
+                    }
+                } else if (field.includes('debug') || field.includes('dedup')) {
+                    if (value.toLowerCase() === 'true') {
+                        convertedValue = true;
+                    } else if (value.toLowerCase() === 'false') {
+                        convertedValue = false;
+                    } else {
+                        alert('Please enter true or false');
+                        return;
+                    }
+                } else {
+                    convertedValue = value;
+                }
+
+                const payload = { [field]: convertedValue };
+                
+                const response = await fetch(`${getBaseUrl()}/config`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+                document.getElementById('configResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Config Updated: ${JSON.stringify(data, null, 2)}`;
+                    
+                // Clear the input
+                document.getElementById('configValue').value = '';
+            } catch (error) {
+                document.getElementById('configResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Config Error: ${error.message}`;
+            }
+        }
+
+        async function sendWebhook() {
+            try {
+                const secret = document.getElementById('webhookSecret').value;
+                const payload = document.getElementById('webhookPayload').value;
+                
+                if (!secret || !payload) {
+                    alert('Please enter both webhook secret and payload');
+                    return;
+                }
+
+                let parsedPayload;
+                try {
+                    parsedPayload = JSON.parse(payload);
+                } catch (e) {
+                    alert('Invalid JSON in payload');
+                    return;
+                }
+
+                const response = await fetch(`${getBaseUrl()}/helius`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-helius-secret': secret
+                    },
+                    body: JSON.stringify(parsedPayload)
+                });
+
+                const responseText = await response.text();
+                document.getElementById('webhookResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Status: ${response.status}\nResponse: ${responseText}`;
+            } catch (error) {
+                document.getElementById('webhookResponse').textContent = 
+                    `[${new Date().toLocaleTimeString()}] Webhook Error: ${error.message}`;
+            }
+        }
+
+        function connectTransfers() {
+            if (transfersEventSource) {
+                transfersEventSource.close();
+            }
+
+            updateStreamOutput('Connecting to transfers stream...', 'info');
+            
+            transfersEventSource = new EventSource(`${getBaseUrl()}/stream/transfers`);
+            
+            transfersEventSource.onopen = function() {
+                document.getElementById('transfersStatus').className = 'status-indicator status-connected';
+                updateStreamOutput('✅ Connected to transfers stream', 'success');
+            };
+
+            transfersEventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    updateStreamOutput(`📊 Transfer: ${JSON.stringify(data, null, 2)}`, 'info');
+                } catch (e) {
+                    updateStreamOutput(`📊 Transfer: ${event.data}`, 'info');
+                }
+            };
+
+            transfersEventSource.onerror = function() {
+                document.getElementById('transfersStatus').className = 'status-indicator status-disconnected';
+                updateStreamOutput('❌ Transfers stream error', 'error');
+            };
+        }
+
+        function connectCoordinated() {
+            if (coordinatedEventSource) {
+                coordinatedEventSource.close();
+            }
+
+            updateStreamOutput('Connecting to coordinated trades stream...', 'info');
+            
+            coordinatedEventSource = new EventSource(`${getBaseUrl()}/stream/coordinated`);
+            
+            coordinatedEventSource.onopen = function() {
+                document.getElementById('coordinatedStatus').className = 'status-indicator status-connected';
+                updateStreamOutput('✅ Connected to coordinated trades stream', 'success');
+            };
+
+            coordinatedEventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    updateStreamOutput(`🎯 Coordinated Trade: ${JSON.stringify(data, null, 2)}`, 'info');
+                } catch (e) {
+                    updateStreamOutput(`🎯 Coordinated Trade: ${event.data}`, 'info');
+                }
+            };
+
+            coordinatedEventSource.onerror = function() {
+                document.getElementById('coordinatedStatus').className = 'status-indicator status-disconnected';
+                updateStreamOutput('❌ Coordinated trades stream error', 'error');
+            };
+        }
+
+        function connectAll() {
+            if (allEventSource) {
+                allEventSource.close();
+            }
+
+            updateStreamOutput('Connecting to all events stream (named events)...', 'info');
+            
+            allEventSource = new EventSource(`${getBaseUrl()}/stream/all`);
+            
+            allEventSource.onopen = function() {
+                document.getElementById('allStatus').className = 'status-indicator status-connected';
+                updateStreamOutput('✅ Connected to all events stream', 'success');
+            };
+
+            // Handle named events
+            allEventSource.addEventListener('transfers', function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    updateStreamOutput(`📊 [ALL-STREAM] Transfer: ${JSON.stringify(data, null, 2)}`, 'info');
+                } catch (e) {
+                    updateStreamOutput(`📊 [ALL-STREAM] Transfer: ${event.data}`, 'info');
+                }
+            });
+
+            allEventSource.addEventListener('coordinated', function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    updateStreamOutput(`🎯 [ALL-STREAM] Coordinated Trade: ${JSON.stringify(data, null, 2)}`, 'info');
+                } catch (e) {
+                    updateStreamOutput(`🎯 [ALL-STREAM] Coordinated Trade: ${event.data}`, 'info');
+                }
+            });
+
+            // Handle generic messages (keepalive, etc.)
+            allEventSource.onmessage = function(event) {
+                // This handles unnamed events like keepalive
+                if (event.data && event.data !== ': keepalive') {
+                    updateStreamOutput(`🔄 [ALL-STREAM] Generic: ${event.data}`, 'info');
+                }
+            };
+
+            allEventSource.onerror = function() {
+                document.getElementById('allStatus').className = 'status-indicator status-disconnected';
+                updateStreamOutput('❌ All events stream error', 'error');
+            };
+        }
+
+        function disconnectAll() {
+            if (transfersEventSource) {
+                transfersEventSource.close();
+                transfersEventSource = null;
+                document.getElementById('transfersStatus').className = 'status-indicator status-disconnected';
+            }
+            
+            if (coordinatedEventSource) {
+                coordinatedEventSource.close();
+                coordinatedEventSource = null;
+                document.getElementById('coordinatedStatus').className = 'status-indicator status-disconnected';
+            }
+
+            if (allEventSource) {
+                allEventSource.close();
+                allEventSource = null;
+                document.getElementById('allStatus').className = 'status-indicator status-disconnected';
+            }
+            
+            updateStreamOutput('🔌 Disconnected all streams', 'info');
+        }
+
+        // Initialize status indicators
+        document.getElementById('transfersStatus').className = 'status-indicator status-disconnected';
+        document.getElementById('coordinatedStatus').className = 'status-indicator status-disconnected';
+        document.getElementById('allStatus').className = 'status-indicator status-disconnected';
+
+        // Test health endpoint on load
+        window.addEventListener('load', function() {
+            setTimeout(testHealth, 1000);
+        });
+    </script>
+</body>
+</html>
