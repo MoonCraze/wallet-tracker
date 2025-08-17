@@ -31,8 +31,11 @@ const heartbeats = new WeakMap<Response, NodeJS.Timeout>();
 function setupSse(res: Response, origin?: string) {
   res.status(200);
   res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
+  // Prevent intermediaries from buffering or transforming the stream
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.setHeader("Vary", "Origin");
   
   // Apply same CORS logic as main API
   const allowedOrigins = process.env.ALLOWED_ORIGINS;
