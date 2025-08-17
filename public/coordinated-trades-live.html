@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Coordinated Trades Monitor</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #0a0e1a;
+            color: #ffffff;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1a237e 0%, #3949ab 100%);
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .controls {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .input-group {
+            margin-bottom: 20px;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #64b5f6;
+        }
+        
+        .input-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            color: white;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        
+        .input-group input:focus {
+            outline: none;
+            border-color: #64b5f6;
+            box-shadow: 0 0 0 3px rgba(100,181,246,0.2);
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .button.primary {
+            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+            color: white;
+        }
+        
+        .button.primary:hover {
+            background: linear-gradient(135deg, #45a049 0%, #3d8b40 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(76,175,80,0.4);
+        }
+        
+        .button.danger {
+            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+            color: white;
+        }
+        
+        .button.danger:hover {
+            background: linear-gradient(135deg, #d32f2f 0%, #c62828 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(244,67,54,0.4);
+        }
+        
+        .button.secondary {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border: 2px solid rgba(255,255,255,0.2);
+        }
+        
+        .button.secondary:hover {
+            background: rgba(255,255,255,0.2);
+            transform: translateY(-2px);
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-weight: bold;
+            text-align: center;
+            font-size: 18px;
+        }
+        
+        .status.connected {
+            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(76,175,80,0.3);
+        }
+        
+        .status.disconnected {
+            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(244,67,54,0.3);
+        }
+        
+        .status.connecting {
+            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(255,152,0,0.3);
+        }
+        
+        .trades-container {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(255,255,255,0.1);
+            min-height: 400px;
+        }
+        
+        .trades-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+        }
+        
+        .trades-count {
+            background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .trade-item {
+            background: rgba(255,255,255,0.05);
+            border-left: 4px solid #4caf50;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s ease;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        .trade-item:hover {
+            background: rgba(255,255,255,0.08);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .trade-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .token-address {
+            font-family: 'Courier New', monospace;
+            background: rgba(100,181,246,0.2);
+            color: #64b5f6;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        .wallet-count {
+            background: linear-gradient(135deg, #ff5722 0%, #d84315 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .trade-details {
+            color: #b0bec5;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .trade-time {
+            color: #4caf50;
+            font-weight: bold;
+        }
+        
+        .wallet-list {
+            margin-top: 15px;
+        }
+        
+        .wallet-list details {
+            cursor: pointer;
+        }
+        
+        .wallet-list summary {
+            color: #64b5f6;
+            font-weight: bold;
+            padding: 8px 0;
+            transition: color 0.3s ease;
+        }
+        
+        .wallet-list summary:hover {
+            color: #90caf9;
+        }
+        
+        .wallet-addresses {
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .wallet-address {
+            font-family: 'Courier New', monospace;
+            background: rgba(255,255,255,0.05);
+            color: #e0e0e0;
+            padding: 8px;
+            margin: 4px 0;
+            border-radius: 4px;
+            font-size: 12px;
+            word-break: break-all;
+            border-left: 3px solid #4caf50;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        
+        .empty-state .icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        
+        .empty-state h3 {
+            margin: 0 0 10px 0;
+            color: #999;
+        }
+        
+        .empty-state p {
+            margin: 0;
+            opacity: 0.8;
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.3);
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255,255,255,0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚨 Live Coordinated Trades Monitor</h1>
+            <p>Real-time detection of coordinated trading activity across multiple wallets</p>
+        </div>
+
+        <div class="controls">
+            <div class="input-group">
+                <label for="apiUrl">🌐 API Server URL:</label>
+                <input type="text" id="apiUrl" value="https://helius.wonderswhisper.com" placeholder="Enter API server URL">
+            </div>
+            
+            <div class="button-group">
+                <button class="button primary" onclick="connectRealtime()">🔴 Connect</button>
+                <button class="button danger" onclick="disconnectRealtime()">⏹️ Disconnect</button>
+                <button class="button secondary" onclick="clearTrades()">🗑️ Clear</button>
+            </div>
+            
+            <div id="connectionStatus" class="status disconnected">
+                ❌ Disconnected - Click Connect to start monitoring
+            </div>
+        </div>
+
+        <div class="trades-container">
+            <div class="trades-header">
+                <h2>📊 Coordinated Trades</h2>
+                <div class="trades-count" id="tradesCount">0 Trades</div>
+            </div>
+            
+            <div id="tradesContainer">
+                <div class="empty-state">
+                    <div class="icon">🔍</div>
+                    <h3>No Coordinated Trades Yet</h3>
+                    <p>Click "Connect" to start monitoring live coordinated trading activity</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let trades = [];
+        let isConnected = false;
+
+        function getApiUrl() {
+            let url = document.getElementById('apiUrl').value.trim();
+            if (!url) url = 'https://helius.wonderswhisper.com';
+            if (!url.endsWith('/')) url += '/';
+            return url;
+        }
+
+        function updateConnectionStatus(status, message) {
+            const statusElement = document.getElementById('connectionStatus');
+            statusElement.className = `status ${status}`;
+            statusElement.innerHTML = message;
+        }
+
+        function updateTradesCount() {
+            document.getElementById('tradesCount').textContent = `${trades.length} Trade${trades.length !== 1 ? 's' : ''}`;
+        }
+
+        function connectRealtime() {
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            const apiUrl = getApiUrl();
+            updateConnectionStatus('connecting', '🔄 Connecting to live stream...');
+
+            try {
+                eventSource = new EventSource(`${apiUrl}stream/coordinated`);
+
+                eventSource.onopen = () => {
+                    isConnected = true;
+                    updateConnectionStatus('connected', '✅ Connected - Monitoring live coordinated trades');
+                    console.log('✅ Connected to coordinated trades stream');
+                };
+
+                eventSource.onmessage = (event) => {
+                    try {
+                        // Skip keepalive messages
+                        if (event.data && event.data.trim() && !event.data.startsWith(':')) {
+                            const trade = JSON.parse(event.data);
+                            addNewTrade(trade);
+                            console.log('🚨 New coordinated trade detected:', trade);
+                        }
+                    } catch (error) {
+                        // Ignore parsing errors for keepalive messages
+                        if (event.data && !event.data.startsWith(':')) {
+                            console.error('Error parsing trade data:', error);
+                        }
+                    }
+                };
+
+                eventSource.onerror = (event) => {
+                    isConnected = false;
+                    updateConnectionStatus('disconnected', '❌ Connection lost - Check server status');
+                    console.error('❌ SSE connection error');
+                    
+                    // Auto-reconnect after 5 seconds
+                    setTimeout(() => {
+                        if (!isConnected && eventSource && eventSource.readyState === 2) {
+                            console.log('🔄 Attempting to reconnect...');
+                            connectRealtime();
+                        }
+                    }, 5000);
+                };
+
+            } catch (error) {
+                updateConnectionStatus('disconnected', '❌ Failed to connect - Check API URL');
+                console.error('Failed to create EventSource:', error);
+            }
+        }
+
+        function disconnectRealtime() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            isConnected = false;
+            updateConnectionStatus('disconnected', '⏹️ Disconnected - Click Connect to resume monitoring');
+            console.log('⏹️ Disconnected from coordinated trades stream');
+        }
+
+        function addNewTrade(trade) {
+            // Add to the beginning of the array
+            trades.unshift(trade);
+            
+            // Keep only the latest 50 trades
+            if (trades.length > 50) {
+                trades = trades.slice(0, 50);
+            }
+            
+            renderTrades();
+            updateTradesCount();
+        }
+
+        function renderTrades() {
+            const container = document.getElementById('tradesContainer');
+            
+            if (trades.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state ${isConnected ? 'pulse' : ''}">
+                        <div class="icon">${isConnected ? '👁️' : '🔍'}</div>
+                        <h3>${isConnected ? 'Watching for Coordinated Trades...' : 'No Coordinated Trades Yet'}</h3>
+                        <p>${isConnected ? 'Connected and monitoring live activity' : 'Click "Connect" to start monitoring live coordinated trading activity'}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const tradesHtml = trades.map((trade, index) => {
+                const walletAddresses = Array.isArray(trade.walletAddresses) 
+                    ? trade.walletAddresses 
+                    : JSON.parse(trade.walletAddresses || '[]');
+                
+                const triggerTime = new Date(trade.triggeredAt);
+                const windowStart = new Date(trade.windowStart);
+                const windowEnd = new Date(trade.windowEnd);
+                
+                return `
+                    <div class="trade-item">
+                        <div class="trade-header">
+                            <div class="token-address">${trade.tokenAddress}</div>
+                            <div class="wallet-count">${trade.uniqueWalletCount} wallets</div>
+                        </div>
+                        <div class="trade-details">
+                            <div><strong>🚨 Detected:</strong> <span class="trade-time">${triggerTime.toLocaleString()}</span></div>
+                            <div><strong>⏰ Window:</strong> ${windowStart.toLocaleTimeString()} - ${windowEnd.toLocaleTimeString()}</div>
+                            <div><strong>📅 Date:</strong> ${windowStart.toLocaleDateString()}</div>
+                        </div>
+                        <div class="wallet-list">
+                            <details>
+                                <summary>👛 View ${walletAddresses.length} Coordinated Wallet Addresses</summary>
+                                <div class="wallet-addresses">
+                                    ${walletAddresses.map(addr => `<div class="wallet-address">${addr}</div>`).join('')}
+                                </div>
+                            </details>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = tradesHtml;
+        }
+
+        function clearTrades() {
+            trades = [];
+            renderTrades();
+            updateTradesCount();
+            console.log('🗑️ Cleared all trades from display');
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            console.log('🚀 Live Coordinated Trades Monitor initialized');
+            renderTrades();
+            updateTradesCount();
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
+
+        // Auto-reconnect when window gains focus
+        window.addEventListener('focus', () => {
+            if (!isConnected && eventSource && eventSource.readyState === 2) {
+                console.log('🔄 Window focused - attempting to reconnect...');
+                setTimeout(connectRealtime, 1000);
+            }
+        });
+    </script>
+</body>
+</html>

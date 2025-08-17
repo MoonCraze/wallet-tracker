@@ -223,3 +223,20 @@ npm run db:studio    # Open Prisma Studio
 ## License
 
 This project is licensed under the MIT License.
+
+
+## Docker Compose
+
+docker-compose down;
+
+docker-compose up --build -d;
+
+docker-compose down; docker-compose up --build -d;
+
+# Tunnel
+
+cd .\Cloudfare; cloudflared tunnel --config .\cloudflared-config.yml run
+
+# Webhook Update
+
+npm run webhook:update
