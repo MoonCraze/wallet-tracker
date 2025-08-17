@@ -167,9 +167,10 @@ export class WebhookService {
   private async checkCoordinatedTrades(touchedTokens: Set<string>): Promise<void> {
     const config = getConfig();
     const now = new Date();
-    const currentWindowStart = this.floorToWindowStart(now);
-    const windowStart = new Date(currentWindowStart.getTime() - (config.coordinatedWindowMinutes * 60_000));
-    const windowEnd = currentWindowStart;
+  const currentWindowStart = this.floorToWindowStart(now);
+  // Use the CURRENT window bucket so detection triggers within-window
+  const windowStart = new Date(currentWindowStart.getTime());
+  const windowEnd = new Date(currentWindowStart.getTime() + (config.coordinatedWindowMinutes * 60_000));
 
     Logger.debug("Checking coordinated trades", {
       windowStart: windowStart.toISOString(),
@@ -178,6 +179,8 @@ export class WebhookService {
     });
 
     for (const tokenAddress of touchedTokens) {
+      // Skip excluded tokens for coordination as well
+      if (config.excludeTokensSet.has(tokenAddress)) continue;
       await this.processTokenForCoordination(tokenAddress, windowStart, windowEnd, now);
     }
   }
@@ -201,12 +204,13 @@ export class WebhookService {
       return;
     }
 
-    // Find unique wallets with BUY transactions in the window
+  // Find unique wallets with BUY transactions in the window up to the trigger time (no lookahead)
     const buyers = await prisma.transferEvent.findMany({
       where: { 
         tokenAddress, 
         side: "BUY", 
-        timestamp: { gte: windowStart, lt: windowEnd } 
+    // Count only events that happened so far within this bucket
+    timestamp: { gte: windowStart, lt: triggeredAt } 
       },
       select: { walletAddress: true },
       distinct: ["walletAddress"]
