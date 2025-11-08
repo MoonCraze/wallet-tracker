@@ -5,3 +5,4 @@ prisma/dev.db-journal
 src/wallets.json
 logs/events.ndjson
 dist
+docs/
