@@ -7,6 +7,9 @@ const EnvSchema = z.object({
   WEBHOOK_SECRET: z.string().min(1),
   ALLOWED_ORIGINS: z.string().optional(),
   
+  // Wallet sync configuration
+  WALLETS_API_ENDPOINT: z.string().optional(),
+  
   // Feature flags
   ALLOW_DEV_ENDPOINTS: z.string().optional().transform(val => val === "1" || val === "true"),
   

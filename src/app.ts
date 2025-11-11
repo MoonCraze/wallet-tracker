@@ -7,6 +7,7 @@ import { Logger } from "./lib/logger.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 import { initRealtime } from "./realtime.js";
 import { CoordinatedTradeScanner } from "./services/coordinator.js";
+import { WalletSyncService } from "./services/walletSync.js";
 import { webhookRoutes } from "./routes/webhook.js";
 import { configRoutes } from "./routes/config.js";
 import { healthRoutes } from "./routes/health.js";
@@ -126,10 +127,14 @@ app.use(errorHandler);
 // Start coordinated trade background scanner
 const coordinator = new CoordinatedTradeScanner();
 
+// Initialize wallet sync service
+const walletSync = new WalletSyncService();
+
 // Graceful shutdown handling
 process.on('SIGINT', () => {
   Logger.info('Received SIGINT, shutting down gracefully');
   coordinator.stop();
+  walletSync.stop();
   server.close(() => {
     Logger.info('Server closed');
     process.exit(0);
@@ -139,6 +144,7 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   Logger.info('Received SIGTERM, shutting down gracefully');
   coordinator.stop();
+  walletSync.stop();
   server.close(() => {
     Logger.info('Server closed');
     process.exit(0);
@@ -156,4 +162,9 @@ server.listen(env.PORT, () => {
 
   // Start background services
   coordinator.start();
+  
+  // Start wallet sync service (with initial sync on first run)
+  walletSync.start(true).catch(err => {
+    Logger.error('Failed to start wallet sync service', { error: err });
+  });
 });

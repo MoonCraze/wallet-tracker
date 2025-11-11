@@ -11,14 +11,14 @@ This document provides instructions for running the Helius Wallet Tracker in Doc
 docker build -t helius-wallet-tracker .
 
 # Run with environment file
-docker run --rm -p 8080:8080 --env-file .env.docker helius-wallet-tracker
+docker run --rm -p 8080:8080 --env-file .env helius-wallet-tracker
 ```
 
 ### 2. Run with Docker Compose (Recommended)
 
 ```bash
 # Start all services (main app + Prisma Studio)
-docker compose --env-file .env.docker up -d
+docker compose --env-file .env up -d
 
 # View logs
 docker compose logs -f helius-tracker
@@ -29,11 +29,11 @@ docker compose down
 
 ## Environment Configuration
 
-Create a `.env.docker` file for Docker deployment:
+Use your existing `.env` file for Docker deployment. Make sure it includes production-ready values:
 
 ```bash
 # Production Environment Configuration
-DATABASE_URL=file:./data/production.db
+DATABASE_URL=file:/app/data/production.db
 PORT=8080
 NODE_ENV=production
 ALLOWED_ORIGINS=*
