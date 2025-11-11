@@ -13,32 +13,32 @@ if ! docker info >/dev/null 2>&1; then
     exit 1
 fi
 
-# Check if .env.production exists
-if [ ! -f ".env.production" ]; then
-    echo "❌ .env.production file not found!"
-    echo "📝 Please copy .env.production template and configure it:"
-    echo "   cp .env.production.example .env.production"
-    echo "   # Edit .env.production with your settings"
+# Check if .env exists
+if [ ! -f ".env" ]; then
+    echo "❌ .env file not found!"
+    echo "📝 Please copy .env.example template and configure it:"
+    echo "   cp .env.example .env"
+    echo "   # Edit .env with your settings"
     exit 1
 fi
 
 # Load environment variables
 set -a
-source .env.production
+source .env
 set +a
 
-echo "✅ Environment loaded from .env.production"
+echo "✅ Environment loaded from .env"
 
 # Build and start the application
 echo "🏗️  Building Docker image..."
-docker-compose --env-file .env.production build
+docker-compose --env-file .env build
 
 echo "🗄️  Setting up database..."
 # Run database migrations in a temporary container
-docker-compose --env-file .env.production run --rm helius-tracker sh -c "npx prisma migrate deploy && npx prisma generate"
+docker-compose --env-file .env run --rm helius-tracker sh -c "npx prisma migrate deploy && npx prisma generate"
 
 echo "🚀 Starting application..."
-docker-compose --env-file .env.production up -d
+docker-compose --env-file .env up -d
 
 # Wait for health check
 echo "⏳ Waiting for application to be healthy..."
@@ -49,7 +49,7 @@ while [[ "$(docker-compose ps helius-tracker --format json | jq -r ".[0].Health"
 done'
 
 # Show status
-docker-compose --env-file .env.production ps
+docker-compose --env-file .env ps
 
 echo ""
 echo "🎉 Deployment successful!"
@@ -64,9 +64,9 @@ echo "   SSE All:   http://localhost:8080/stream/all"
 echo "   Dashboard: http://localhost:8080/realtime-test.html"
 echo ""
 echo "📝 Useful commands:"
-echo "   View logs:    docker-compose --env-file .env.production logs -f"
-echo "   Stop:         docker-compose --env-file .env.production down"
-echo "   Restart:      docker-compose --env-file .env.production restart"
+echo "   View logs:    docker-compose --env-file .env logs -f"
+echo "   Stop:         docker-compose --env-file .env down"
+echo "   Restart:      docker-compose --env-file .env restart"
 echo "   Update:       ./deploy.sh"
 echo ""
 

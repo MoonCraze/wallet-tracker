@@ -64,6 +64,9 @@ ALLOWED_ORIGINS="*"
 ### Optional Configuration
 
 ```env
+# Wallet Sync (Daily auto-update at midnight)
+WALLETS_API_ENDPOINT="https://your-api-endpoint.com/top-wallets"
+
 # Transaction Filtering
 EXCLUDE_TOKENS="So11111111111111111111111111111111111111112"  # WSOL mint
 MIN_AMOUNT=1
@@ -110,14 +113,14 @@ npm run docker:run
 ### Docker Compose
 
 ```bash
-# Start with production environment
-docker-compose --env-file .env.production up -d
+# Start with your environment file
+docker-compose --env-file .env up -d
 
 # View logs
-npm run prod:logs
+docker-compose logs -f
 
 # Stop services
-npm run prod:stop
+docker-compose down
 ```
 
 ## Architecture
@@ -153,6 +156,16 @@ src/
 ```
 
 ## Key Features
+
+### Automated Wallet List Management
+
+The system automatically syncs the top 100 performing wallets daily at midnight:
+- Fetches wallet data from a configured API endpoint
+- Updates `wallets.json` with the latest addresses
+- Runs automatically in the background
+- Can be triggered manually with `npm run wallets:sync`
+
+See [Wallet Sync Documentation](docs/WALLET_SYNC.md) for details.
 
 ### Coordinated Trade Detection
 
@@ -204,12 +217,14 @@ The application provides several monitoring capabilities:
 ### Project Scripts
 
 ```bash
-npm run dev          # Start development server with auto-reload
-npm run build        # Build TypeScript to JavaScript
-npm run start        # Start production server
-npm run db:generate  # Generate Prisma client
-npm run db:migrate   # Run database migrations
-npm run db:studio    # Open Prisma Studio
+npm run dev           # Start development server with auto-reload
+npm run build         # Build TypeScript to JavaScript
+npm run start         # Start production server
+npm run db:generate   # Generate Prisma client
+npm run db:migrate    # Run database migrations
+npm run db:studio     # Open Prisma Studio
+npm run wallets:sync  # Manually sync wallet list from API
+npm run webhook:update # Update Helius webhook configuration
 ```
 
 ### Adding New Features
