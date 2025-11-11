@@ -250,8 +250,17 @@ docker-compose down; docker-compose up --build -d;
 
 # Tunnel
 
+cd ./Cloudfare && cloudflared tunnel --config ./cloudflared-config.yml run
 cd .\Cloudfare; cloudflared tunnel --config .\cloudflared-config.yml run
+
+cd /workspaces/wallet-tracker/Cloudfare && cloudflared tunnel --config ./cloudflared-config.yml run
 
 # Webhook Update
 
 npm run webhook:update
+
+# For Cloudfare in linux
+
+curl -LO https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && sudo dpkg -i cloudflared-linux-amd64.deb
+
+cp /workspaces/wallet-tracker/Cloudfare/c8e67b13-2249-4281-8170-7744ff8fdfa2.json ~/.cloudflared/
