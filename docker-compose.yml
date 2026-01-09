@@ -19,6 +19,7 @@ services:
       - COORDINATED_MIN_WALLETS=${COORDINATED_MIN_WALLETS:-3}
       - ALLOW_DEV_ENDPOINTS=${ALLOW_DEV_ENDPOINTS:-0}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - WALLETS_API_ENDPOINT=${WALLETS_API_ENDPOINT}
     volumes:
       - helius_data:/app/data  # Persist SQLite database
       - helius_logs:/app/logs  # Persist logs

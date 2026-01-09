@@ -250,7 +250,7 @@ docker-compose down; docker-compose up --build -d;
 
 # Tunnel
 
-cd .\Cloudfare; cloudflared tunnel --config .\cloudflared-config.yml run
+cd .\Cloudfare; cloudflared tunnel --config .\cloudflared-config run
 
 # Webhook Update
 
