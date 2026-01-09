@@ -6,3 +6,7 @@ src/wallets.json
 logs/events.ndjson
 dist
 docs/
+
+cloudflared-linux-amd64.deb
+
+Cloudfare/
