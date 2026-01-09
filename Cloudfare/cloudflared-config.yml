@@ -3,6 +3,6 @@ credentials-file: ~/.cloudflared/c8e67b13-2249-4281-8170-7744ff8fdfa2.json
 # credentials-file: C:\Users\Sachitha\.cloudflared\c8e67b13-2249-4281-8170-7744ff8fdfa2.json
 
 ingress:
-  - hostname: helius.wonderswhisper.com
+  - hostname: helius.sarislabs.com
     service: http://localhost:8080
   - service: http_status:404

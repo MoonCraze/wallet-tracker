@@ -86,6 +86,28 @@ export class WalletSyncService {
   }
 
   /**
+   * Read existing wallets from wallets.json file
+   */
+  async readExistingWallets(): Promise<string[]> {
+    try {
+      const fileContent = await fs.readFile(this.walletsFilePath, "utf-8");
+      const wallets = JSON.parse(fileContent);
+      
+      if (Array.isArray(wallets) && wallets.length > 0) {
+        Logger.info(`Loaded ${wallets.length} wallets from existing file`);
+        return wallets;
+      }
+      return [];
+    } catch (error) {
+      Logger.warn("Could not read existing wallets.json file", {
+        filePath: this.walletsFilePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /**
    * Update wallets.json file with new wallet addresses
    */
   async updateWalletsFile(walletAddresses: string[]): Promise<void> {
@@ -111,6 +133,10 @@ export class WalletSyncService {
   async syncWallets(): Promise<void> {
     if (!this.apiEndpoint) {
       Logger.info("Wallet sync skipped: No API endpoint configured");
+      const existingWallets = await this.readExistingWallets();
+      if (existingWallets.length > 0) {
+        Logger.info(`Using ${existingWallets.length} wallets from saved file`);
+      }
       return;
     }
 
@@ -122,10 +148,22 @@ export class WalletSyncService {
         await this.updateWalletsFile(wallets);
         Logger.info("Wallet sync completed successfully");
       } else {
-        Logger.warn("No wallets fetched, skipping file update");
+        Logger.warn("No wallets fetched from API");
+        const existingWallets = await this.readExistingWallets();
+        if (existingWallets.length > 0) {
+          Logger.info(`Falling back to ${existingWallets.length} wallets from saved file`);
+        } else {
+          Logger.error("No wallets available - API failed and no saved wallets found");
+        }
       }
     } catch (error) {
-      Logger.error("Wallet sync failed", { error });
+      Logger.error("Wallet sync failed, attempting to use saved wallets", { error });
+      const existingWallets = await this.readExistingWallets();
+      if (existingWallets.length > 0) {
+        Logger.info(`Falling back to ${existingWallets.length} wallets from saved file`);
+      } else {
+        Logger.error("No wallets available - API failed and no saved wallets found");
+      }
     }
   }
 
