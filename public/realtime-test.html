@@ -68,6 +68,8 @@
         </div>
       </div>
       <div class="toolbar">
+        <span id="authStatus" class="chip" style="background:var(--surface); border-color:var(--border)">🔓 Public</span>
+        <a href="login.html" style="color:var(--text); text-decoration:none; background:var(--chip); padding:8px 12px; border-radius:8px; border:1px solid var(--border); font-size:12px">Login</a>
         <button id="connect" title="Open SSE connection">Connect</button>
   <button id="disconnect" title="Close SSE connection">Disconnect</button>
         <button id="refreshCfg" title="Fetch current server config">Refresh Config</button>
@@ -246,11 +248,16 @@
         return location.origin;
       }
       function initBaseUrl(){
+        // Detect correct API URL for Live Server
+        const defaultUrl = (window.location.port === '5500' || window.location.port === '3000') 
+            ? 'http://localhost:8080' 
+            : location.origin;
+            
         try{
           const saved = localStorage.getItem('rt-baseUrl');
           if (saved && baseUrlEl) baseUrlEl.value = saved;
         }catch{}
-        if (baseUrlEl && !baseUrlEl.value) baseUrlEl.value = location.origin;
+        if (baseUrlEl && !baseUrlEl.value) baseUrlEl.value = defaultUrl;
         baseUrlEl?.addEventListener('change', ()=>{
           try{ localStorage.setItem('rt-baseUrl', baseUrlEl.value); }catch{}
         });
@@ -481,13 +488,27 @@
       }
     async function fetchConfig(){
         try {
-      const res = await fetch(`${getBaseUrl()}/config`);
+          const token = localStorage.getItem('jwt_token');
+          const headers = {};
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+          }
+      const res = await fetch(`${getBaseUrl()}/config`, { headers });
           if (!res.ok) throw new Error('GET /config failed');
           const c = await res.json();
           fillConfig(c);
           log('Loaded config', 'ok');
         } catch (e){ log('Config load failed', 'err'); }
       }
+      function getAuthHeaders() {
+        const token = localStorage.getItem('jwt_token');
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        return headers;
+      }
+
     async function saveConfig(){
         try {
           const body = {
@@ -499,7 +520,7 @@
             debugEvents: !!cfgDebug.checked,
             debugEventsVerbose: !!cfgDebugV.checked,
           };
-      const res = await fetch(`${getBaseUrl()}/config`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch(`${getBaseUrl()}/config`, { method: 'PATCH', headers: getAuthHeaders(), body: JSON.stringify(body) });
           if (!res.ok) throw new Error('PATCH /config failed');
           const c = await res.json();
           fillConfig(c);
@@ -510,7 +531,7 @@
       // Dev triggers
     async function postJson(url, body){
         try {
-      const res = await fetch(`${getBaseUrl()}${url}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const res = await fetch(`${getBaseUrl()}${url}`, { method:'POST', headers: getAuthHeaders(), body: JSON.stringify(body) });
           if (!res.ok) throw new Error(String(res.status));
           const j = await res.json();
           log('POST ' + url + ' ok ' + JSON.stringify(j), 'ok');
@@ -536,9 +557,47 @@
         log('Coordinated table cleared', 'warn');
       });
 
+      // Check authentication status
+      async function checkAuthStatus() {
+        const token = localStorage.getItem('jwt_token');
+        const authStatus = document.getElementById('authStatus');
+        
+        if (!token) {
+          authStatus.textContent = '🔓 Public';
+          return null;
+        }
+
+        try {
+          const response = await fetch(`${getBaseUrl()}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            authStatus.textContent = `🔐 ${data.username}`;
+            authStatus.style.background = 'var(--ok)';
+            authStatus.style.color = 'var(--bg)';
+            return token;
+          } else {
+            localStorage.removeItem('jwt_token');
+            authStatus.textContent = '🔓 Public';
+            return null;
+          }
+        } catch (error) {
+          console.error('Auth check failed:', error);
+          authStatus.textContent = '🔓 Public';
+          return null;
+        }
+      }
+
       // Initial actions
   initBaseUrl();
   loadFilters();
+  checkAuthStatus().then(token => {
+    if (!token) {
+      console.warn('Not authenticated - config changes may fail');
+    }
+  });
   fetchConfig();
   connectSSE();
   applyFilters();

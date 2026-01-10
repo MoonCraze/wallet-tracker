@@ -1,102 +1,273 @@
 # 🐳 Docker Deployment Guide
 
-This document provides instructions for running the Helius Wallet Tracker in Docker.
+This document provides instructions for running the Helius Wallet Tracker in Docker with PostgreSQL.
+
+## Prerequisites
+
+- Docker and Docker Compose installed
+- PostgreSQL database (e.g., Neon.tech, Supabase, or self-hosted)
+- `.env.production` file configured with database credentials
 
 ## Quick Start
 
-### 1. Build and Run with Docker
+### 1. Prepare Environment File
+
+Copy the example environment file and fill in your values:
+
+```bash
+cp .env.production.example .env.production
+```
+
+Edit `.env.production` with your PostgreSQL connection string and other settings.
+
+### 2. Build and Run with Docker Compose (Recommended)
+
+```bash
+# Build and start the service
+docker compose --env-file .env.production up -d
+
+# View logs
+docker compose logs -f helius-tracker
+
+# Stop the service
+docker compose down
+```
+
+### 3. Alternative: Run with Docker directly
 
 ```bash
 # Build the Docker image
 docker build -t helius-wallet-tracker .
 
 # Run with environment file
-docker run --rm -p 8080:8080 --env-file .env helius-wallet-tracker
-```
-
-### 2. Run with Docker Compose (Recommended)
-
-```bash
-# Start all services (main app + Prisma Studio)
-docker compose --env-file .env up -d
+docker run -d \
+  -p 8080:8080 \
+  --name helius-tracker \
+  --env-file .env.production \
+  --restart unless-stopped \
+  helius-wallet-tracker
 
 # View logs
-docker compose logs -f helius-tracker
+docker logs -f helius-tracker
 
-# Stop all services
-docker compose down
+# Stop and remove
+docker stop helius-tracker && docker rm helius-tracker
 ```
 
 ## Environment Configuration
 
-Use your existing `.env` file for Docker deployment. Make sure it includes production-ready values:
+Required environment variables in `.env.production`:
 
 ```bash
-# Production Environment Configuration
-DATABASE_URL=file:/app/data/production.db
+# Database (PostgreSQL - Required)
+DATABASE_URL="postgresql://user:password@host:port/database?sslmode=require"
+DIRECT_URL="postgresql://user:password@host:port/database?sslmode=require"
+
+# Helius API
+HELIUS_API_KEY=your-helius-api-key
+WEBHOOK_URL=https://yourdomain.com/helius
+WEBHOOK_SECRET=your-secure-webhook-secret
+
+# Server
 PORT=8080
 NODE_ENV=production
-ALLOWED_ORIGINS=*
-WEBHOOK_SECRET=super-secret-production-key
-EXCLUDE_TOKENS=So11111111111111111111111111111111111111112
-MIN_AMOUNT=1
+
+# Authentication
+JWT_SECRET=your-super-secret-jwt-key-min-32-characters
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your-secure-password
+
+# CORS
+ALLOWED_ORIGINS=https://yourdomain.com
+
+# Security (Production)
+ALLOW_DEV_ENDPOINTS=0  # Disable dev endpoints
+DEBUG_EVENTS=0
+
+# Features
 COORDINATED_WINDOW_MINUTES=5
 COORDINATED_MIN_WALLETS=5
-DEDUP_BY_SIGNATURE_ONLY=false
-DEBUG_EVENTS=false
-DEBUG_EVENTS_VERBOSE=false
-ALLOW_DEV_ENDPOINTS=false
+MIN_AMOUNT=1
+DEDUP_BY_SIGNATURE_ONLY=0
 ```
 
-## Available Services
+## Available Endpoints
 
 ### Main Application
 - **Port**: 8080
-- **Health Check**: http://localhost:8080/health
-- **Config API**: http://localhost:8080/config
-- **Webhook Endpoint**: http://localhost:8080/helius
-- **SSE Streams**: 
-  - http://localhost:8080/stream/transfers
-  - http://localhost:8080/stream/coordinated
-  - http://localhost:8080/stream/all
+- **Health Check**: `GET http://localhost:8080/health`
+- **Config API**: `GET http://localhost:8080/config`
+- **Webhook Endpoint**: `POST http://localhost:8080/helius`
+- **SSE Stream**: `GET http://localhost:8080/sse`
+- **Auth API**: 
+  - `POST http://localhost:8080/api/auth/login`
+  - `POST http://localhost:8080/api/auth/logout`
+  - `GET http://localhost:8080/api/auth/me`
 
-### Prisma Studio (Optional)
-- **Port**: 5555
-- **URL**: http://localhost:5555
-- **Purpose**: Database management interface
+### Development Endpoints (if ALLOW_DEV_ENDPOINTS=1)
+⚠️ **Disable in production for security!**
+- `GET /dev/db/transfers?limit=50` - View transfers
+- `GET /dev/db/coordinated?limit=50` - View coordinated trades
+- `GET /dev/db/stats` - Database statistics
 
 ## Testing the Deployment
 
 ```bash
-# Test health endpoint
+# 1. Test health endpoint
 curl http://localhost:8080/health
 
-# Test configuration
-curl http://localhost:8080/config
+# 2. Test authentication
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"your-password"}'
 
-# Test webhook (requires authentication)
+# 3. Test webhook (requires Helius signature)
 curl -X POST http://localhost:8080/helius \
   -H "Content-Type: application/json" \
-  -H "x-helius-secret: super-secret-production-key" \
+  -H "x-helius-secret: your-webhook-secret" \
   -d '{"test": "data"}'
 
-# Test SSE stream
-curl -N http://localhost:8080/stream/transfers
+# 4. Test SSE stream
+curl -N http://localhost:8080/sse
+
+# 5. Test database stats (if dev endpoints enabled)
+curl http://localhost:8080/dev/db/stats
 ```
 
-## Production Deployment
+## Production Deployment Best Practices
 
-For production deployment:
+### 1. Security
+```bash
+# In .env.production
+ALLOW_DEV_ENDPOINTS=0          # Disable dev endpoints
+DEBUG_EVENTS=0                 # Disable event logging
+JWT_SECRET=min-32-chars-random # Strong JWT secret
+ADMIN_PASSWORD=strong-password # Strong admin password
+ALLOWED_ORIGINS=https://yourdomain.com  # Specific origins only
+```
 
-1. **Update environment variables**:
-   - Change `WEBHOOK_SECRET` to a secure value
-   - Set `NODE_ENV=production`
-   - Configure `ALLOWED_ORIGINS` for your domain
-   - Disable `ALLOW_DEV_ENDPOINTS`
+### 2. Database
+- Use **PostgreSQL with TimescaleDB** for optimal performance
+- Use connection pooling (e.g., Neon pooler, PgBouncer)
+- Ensure SSL/TLS is enabled (`sslmode=require`)
+- Regular backups of PostgreSQL database
 
-2. **Persist data**:
-   - Database: `/app/data/production.db`
-   - Logs: `/app/logs/`
+### 3. Monitoring
+```bash
+# View real-time logs
+docker compose logs -f helius-tracker
+
+# Check container health
+docker ps
+docker inspect helius-tracker
+
+# Resource usage
+docker stats helius-tracker
+```
+
+### 4. Updates and Maintenance
+```bash
+# Pull latest code
+git pull
+
+# Rebuild and restart
+docker compose --env-file .env.production up -d --build
+
+# Or for Docker directly
+docker build -t helius-wallet-tracker .
+docker stop helius-tracker
+docker rm helius-tracker
+docker run -d -p 8080:8080 --env-file .env.production --name helius-tracker helius-wallet-tracker
+```
+
+## Persistent Data
+
+With PostgreSQL, data persistence is handled by your external database provider (Neon.tech, Supabase, etc.).
+
+**Logs** are persisted in a Docker volume:
+```bash
+# View logs volume
+docker volume inspect helius-wallet-tracker_helius_logs
+
+# Backup logs
+docker run --rm -v helius-wallet-tracker_helius_logs:/logs -v $(pwd):/backup alpine tar czf /backup/logs-backup.tar.gz /logs
+```
+
+## Troubleshooting
+
+### Database Connection Issues
+```bash
+# Test database connection from container
+docker exec helius-tracker npx tsx -e "import pkg from 'pg'; const {Client} = pkg; const c = new Client({connectionString: process.env.DATABASE_URL}); await c.connect(); console.log('Connected!'); await c.end();"
+
+# Check environment variables
+docker exec helius-tracker env | grep DATABASE_URL
+```
+
+### Container Won't Start
+```bash
+# View full logs
+docker logs helius-tracker
+
+# Check health status
+docker inspect helius-tracker | grep -A 10 Health
+```
+
+### Performance Issues
+```bash
+# Monitor resource usage
+docker stats helius-tracker
+
+# Increase memory limit if needed
+docker run -d -p 8080:8080 --memory="1g" --env-file .env.production helius-wallet-tracker
+```
+
+## Cloud Deployment
+
+### Deploy to Railway
+```bash
+# Install Railway CLI
+npm install -g @railway/cli
+
+# Login and deploy
+railway login
+railway init
+railway up
+```
+
+### Deploy to Render
+1. Connect your GitHub repository
+2. Create new Web Service
+3. Set build command: `npm install && npx prisma generate && npm run build`
+4. Set start command: `node dist/app.js`
+5. Add environment variables from `.env.production`
+
+### Deploy to fly.io
+```bash
+# Install flyctl
+curl -L https://fly.io/install.sh | sh
+
+# Deploy
+fly launch
+fly deploy
+```
+
+---
+
+## Summary
+
+✅ **Updated for PostgreSQL**: No more SQLite volumes needed  
+✅ **Authentication**: JWT-based auth included  
+✅ **TimescaleDB Ready**: Optimized for time-series data  
+✅ **Production Security**: Dev endpoints disabled by default  
+✅ **Health Checks**: Built-in health monitoring  
+✅ **Logs Persistence**: Logs saved in Docker volume  
+
+For more details, see:
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Full deployment guide
+- [DATABASE_RECOMMENDATIONS.md](docs/DATABASE_RECOMMENDATIONS.md) - Database setup
+- [TIMESCALEDB_SETUP_COMPLETE.md](docs/TIMESCALEDB_SETUP_COMPLETE.md) - TimescaleDB features
+
 
 3. **Monitor health**:
    - Health check: `GET /health`

@@ -45,8 +45,8 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma ./prisma/
 COPY --from=builder /app/src/wallets.json ./dist/
 
-# Create data directory for SQLite
-RUN mkdir -p /app/data && chown nodejs:nodejs /app/data
+# Create logs directory (database is now external PostgreSQL)
+RUN mkdir -p /app/logs && chown nodejs:nodejs /app/logs
 
 # Switch to non-root user
 USER nodejs

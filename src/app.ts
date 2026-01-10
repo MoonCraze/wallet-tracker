@@ -5,12 +5,14 @@ import { createServer } from "node:http";
 import { validateEnv, getEnv } from "./lib/env.js";
 import { Logger } from "./lib/logger.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
+import { jwtAuth } from "./middleware/jwtAuth.js";
 import { initRealtime } from "./realtime.js";
 import { CoordinatedTradeScanner } from "./services/coordinator.js";
 import { WalletSyncService } from "./services/walletSync.js";
 import { webhookRoutes } from "./routes/webhook.js";
 import { configRoutes } from "./routes/config.js";
 import { healthRoutes } from "./routes/health.js";
+import { authRoutes } from "./routes/auth.js";
 
 // Validate environment variables
 const env = validateEnv();
@@ -44,6 +46,9 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
+// Serve static files from public directory
+app.use(express.static('public'));
+
 // JSON parsing middleware for webhook routes only
 app.use('/helius', express.json({ 
   limit: "10mb", 
@@ -53,16 +58,20 @@ app.use('/helius', express.json({
 // JSON parsing for config routes
 app.use('/config', express.json());
 
+// JSON parsing for auth routes
+app.use('/api/auth', express.json());
+
 // Routes
 app.use(healthRoutes);
-app.use(configRoutes);
+app.use('/config', jwtAuth, configRoutes);  // Protected: requires JWT
 app.use(webhookRoutes);
+app.use('/api/auth', authRoutes);
 
-// Development endpoints (if enabled)
+// Development endpoints (if enabled) - Protected with JWT
 if (env.ALLOW_DEV_ENDPOINTS) {
-  app.get('/dev/ping', (_req, res) => res.json({ ok: true, now: new Date().toISOString() }));
+  app.get('/dev/ping', jwtAuth, (_req, res) => res.json({ ok: true, now: new Date().toISOString() }));
   
-  app.get('/dev/db/transfers', async (req, res) => {
+  app.get('/dev/db/transfers', jwtAuth, async (req, res) => {
     try {
       const { default: { PrismaClient } } = await import('@prisma/client');
       const prisma = new PrismaClient();
@@ -80,7 +89,7 @@ if (env.ALLOW_DEV_ENDPOINTS) {
     }
   });
 
-  app.get('/dev/db/coordinated', async (req, res) => {
+  app.get('/dev/db/coordinated', jwtAuth, async (req, res) => {
     try {
       const { default: { PrismaClient } } = await import('@prisma/client');
       const prisma = new PrismaClient();
@@ -98,7 +107,7 @@ if (env.ALLOW_DEV_ENDPOINTS) {
     }
   });
 
-  app.get('/dev/db/stats', async (req, res) => {
+  app.get('/dev/db/stats', jwtAuth, async (req, res) => {
     try {
       const { default: { PrismaClient } } = await import('@prisma/client');
       const prisma = new PrismaClient();
