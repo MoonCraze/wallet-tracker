@@ -14,6 +14,7 @@ import { configRoutes } from "./routes/config.js";
 import { healthRoutes } from "./routes/health.js";
 import { authRoutes } from "./routes/auth.js";
 import { walletsRoutes } from "./routes/wallets.js";
+import { prisma } from "./db.js";
 
 // Validate environment variables
 const env = validateEnv();
@@ -78,52 +79,142 @@ if (env.ALLOW_DEV_ENDPOINTS) {
   
   app.get('/dev/db/transfers', jwtAuth, async (req, res) => {
     try {
-      const { default: { PrismaClient } } = await import('@prisma/client');
-      const prisma = new PrismaClient();
-      
       const limit = parseInt(req.query.limit as string) || 50;
+      const startTime = req.query.startTime as string;
+      const endTime = req.query.endTime as string;
+      
+      // Build where clause for time filtering with proper validation
+      const where: any = {};
+      const hasTimeFilter = !!(startTime || endTime);
+      
+      if (hasTimeFilter) {
+        where.timestamp = {};
+        if (startTime) {
+          const date = new Date(startTime);
+          if (isNaN(date.getTime())) {
+            return res.status(400).json({ error: 'Invalid startTime format. Use ISO 8601 format.' });
+          }
+          where.timestamp.gte = date;
+        }
+        if (endTime) {
+          const date = new Date(endTime);
+          if (isNaN(date.getTime())) {
+            return res.status(400).json({ error: 'Invalid endTime format. Use ISO 8601 format.' });
+          }
+          where.timestamp.lte = date;
+        }
+      }
+      
+      // Only apply limit when no time filtering (to get all results in time range)
       const transfers = await prisma.transferEvent.findMany({
+        where,
         orderBy: { timestamp: 'desc' },
-        take: limit
+        ...(hasTimeFilter ? {} : { take: limit })
       });
       
-      await prisma.$disconnect();
-      res.json(transfers);
+      // Format response to match documentation structure
+      const formatted = transfers.map((t: any) => ({
+        id: t.id,
+        signature: t.signature,
+        timestamp: t.timestamp instanceof Date ? t.timestamp.toISOString() : t.timestamp,
+        walletAddress: t.walletAddress,
+        tokenAddress: t.tokenAddress,
+        amount: t.amount,
+        side: t.side,
+      }));
+      
+      res.json(formatted);
     } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch transfers' });
+      Logger.error('Failed to fetch transfers', { error });
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
   app.get('/dev/db/coordinated', jwtAuth, async (req, res) => {
     try {
-      const { default: { PrismaClient } } = await import('@prisma/client');
-      const prisma = new PrismaClient();
-      
       const limit = parseInt(req.query.limit as string) || 50;
       const coordinated = await prisma.coordinatedTrade.findMany({
         orderBy: { triggeredAt: 'desc' },
         take: limit
       });
       
-      await prisma.$disconnect();
-      res.json(coordinated);
+      // Format response to match documentation structure
+      const formatted = coordinated.map((c: any) => {
+        let wallets: string[] = [];
+        try {
+          wallets = JSON.parse(c.walletAddresses);
+        } catch (e) {
+          Logger.warn('Failed to parse walletAddresses', { id: c.id });
+        }
+        
+        const timeWindowSeconds = Math.round(
+          (new Date(c.windowEnd).getTime() - new Date(c.windowStart).getTime()) / 1000
+        );
+        
+        return {
+          id: c.id,
+          timestamp: c.triggeredAt instanceof Date ? c.triggeredAt.toISOString() : c.triggeredAt,
+          tokenAddress: c.tokenAddress,
+          walletCount: c.uniqueWalletCount,
+          wallets: wallets,
+          timeWindowSeconds: timeWindowSeconds,
+          pattern: 'simultaneous_buy' // Default pattern type
+        };
+      });
+      
+      res.json(formatted);
     } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch coordinated trades' });
+      Logger.error('Failed to fetch coordinated trades', { error });
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
   app.get('/dev/db/stats', jwtAuth, async (req, res) => {
     try {
-      const { default: { PrismaClient } } = await import('@prisma/client');
-      const prisma = new PrismaClient();
+      // Parallelize all independent database queries for better performance
+      const [
+        transferCount,
+        coordinatedCount,
+        uniqueWalletsResult,
+        uniqueTokensResult,
+        oldestTransfer,
+        newestTransfer
+      ] = await Promise.all([
+        prisma.transferEvent.count(),
+        prisma.coordinatedTrade.count(),
+        prisma.transferEvent.findMany({
+          select: { walletAddress: true },
+          distinct: ['walletAddress']
+        }),
+        prisma.transferEvent.findMany({
+          select: { tokenAddress: true },
+          distinct: ['tokenAddress']
+        }),
+        prisma.transferEvent.findFirst({
+          orderBy: { timestamp: 'asc' },
+          select: { timestamp: true }
+        }),
+        prisma.transferEvent.findFirst({
+          orderBy: { timestamp: 'desc' },
+          select: { timestamp: true }
+        })
+      ]);
       
-      const transferCount = await prisma.transferEvent.count();
-      const coordinatedCount = await prisma.coordinatedTrade.count();
-      
-      await prisma.$disconnect();
-      res.json({ transferCount, coordinatedCount });
+      res.json({
+        transferCount,
+        coordinatedCount,
+        uniqueWallets: uniqueWalletsResult.length,
+        uniqueTokens: uniqueTokensResult.length,
+        oldestTransfer: oldestTransfer?.timestamp instanceof Date 
+          ? oldestTransfer.timestamp.toISOString() 
+          : oldestTransfer?.timestamp || null,
+        newestTransfer: newestTransfer?.timestamp instanceof Date 
+          ? newestTransfer.timestamp.toISOString() 
+          : newestTransfer?.timestamp || null
+      });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch stats' });
+      Logger.error('Failed to fetch database stats', { error });
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
   
