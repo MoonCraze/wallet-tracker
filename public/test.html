@@ -466,7 +466,9 @@
         async function getConfig() {
             try {
                 updateApiResponse('Getting configuration...');
-                const response = await fetch(`${getBaseUrl()}/config`);
+                const response = await fetch(`${getBaseUrl()}/config`, {
+                    headers: getAuthHeaders()
+                });
                 const data = await response.json();
                 updateApiResponse(`Configuration: ${JSON.stringify(data, null, 2)}`);
             } catch (error) {
@@ -477,7 +479,9 @@
         async function getRecentTransfers() {
             try {
                 updateApiResponse('Getting recent transfers...');
-                const response = await fetch(`${getBaseUrl()}/dev/db/transfers?limit=10`);
+                const response = await fetch(`${getBaseUrl()}/dev/db/transfers?limit=10`, {
+                    headers: getAuthHeaders()
+                });
                 const data = await response.json();
                 updateApiResponse(`Recent Transfers: ${JSON.stringify(data, null, 2)}`);
             } catch (error) {
@@ -488,7 +492,9 @@
         async function getCoordinatedTrades() {
             try {
                 updateApiResponse('Getting recent coordinated trades...');
-                const response = await fetch(`${getBaseUrl()}/dev/db/coordinated?limit=5`);
+                const response = await fetch(`${getBaseUrl()}/dev/db/coordinated?limit=5`, {
+                    headers: getAuthHeaders()
+                });
                 const data = await response.json();
                 updateApiResponse(`Coordinated Trades: ${JSON.stringify(data, null, 2)}`);
             } catch (error) {
@@ -499,7 +505,9 @@
         async function getDbStats() {
             try {
                 updateApiResponse('Getting database statistics...');
-                const response = await fetch(`${getBaseUrl()}/dev/db/stats`);
+                const response = await fetch(`${getBaseUrl()}/dev/db/stats`, {
+                    headers: getAuthHeaders()
+                });
                 const data = await response.json();
                 updateApiResponse(`Database Stats: ${JSON.stringify(data, null, 2)}`);
             } catch (error) {
@@ -509,7 +517,9 @@
 
         async function getExcludeTokens() {
             try {
-                const response = await fetch(`${getBaseUrl()}/config/exclude-tokens`);
+                const response = await fetch(`${getBaseUrl()}/config/exclude-tokens`, {
+                    headers: getAuthHeaders()
+                });
                 const data = await response.json();
                 document.getElementById('tokenResponse').textContent = 
                     `[${new Date().toLocaleTimeString()}] Exclude Tokens: ${JSON.stringify(data, null, 2)}`;
@@ -596,7 +606,9 @@
 
         async function getCurrentConfig() {
             try {
-                const response = await fetch(`${getBaseUrl()}/config`);
+                const response = await fetch(`${getBaseUrl()}/config`, {
+                    headers: getAuthHeaders()
+                });
                 const data = await response.json();
                 document.getElementById('configResponse').textContent = 
                     `[${new Date().toLocaleTimeString()}] Current Config: ${JSON.stringify(data, null, 2)}`;
