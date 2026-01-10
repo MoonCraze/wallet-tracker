@@ -153,6 +153,12 @@
                 <p>Admin authentication for protected features</p>
             </a>
 
+            <a href="wallets.html" class="page-card" id="walletsCard">
+                <span class="icon">💼</span>
+                <h3>Wallet Management</h3>
+                <p>View and manage tracked wallet addresses</p>
+            </a>
+
             <a href="test.html" class="page-card">
                 <span class="icon">🔧</span>
                 <h3>Endpoint Testing</h3>
@@ -191,10 +197,17 @@
         async function checkAuthStatus() {
             const token = localStorage.getItem('jwt_token');
             const authStatus = document.getElementById('authStatus');
+            const walletsCard = document.getElementById('walletsCard');
             
             if (!token) {
                 authStatus.textContent = '🔓 Public Access Mode';
                 authStatus.className = 'auth-status';
+                // Disable wallets card for non-authenticated users
+                if (walletsCard) {
+                    walletsCard.style.opacity = '0.5';
+                    walletsCard.style.pointerEvents = 'none';
+                    walletsCard.title = 'Login required';
+                }
                 return;
             }
 
@@ -211,11 +224,21 @@
                     localStorage.removeItem('jwt_token');
                     authStatus.textContent = '🔓 Public Access Mode';
                     authStatus.className = 'auth-status';
+                    if (walletsCard) {
+                        walletsCard.style.opacity = '0.5';
+                        walletsCard.style.pointerEvents = 'none';
+                        walletsCard.title = 'Login required';
+                    }
                 }
             } catch (error) {
                 console.error('Auth check failed:', error);
                 authStatus.textContent = '🔓 Public Access Mode';
                 authStatus.className = 'auth-status';
+                if (walletsCard) {
+                    walletsCard.style.opacity = '0.5';
+                    walletsCard.style.pointerEvents = 'none';
+                    walletsCard.title = 'Login required';
+                }
             }
         }
 

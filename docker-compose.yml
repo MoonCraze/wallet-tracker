@@ -28,6 +28,7 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin@123}
     volumes:
       - helius_logs:/app/logs  # Persist logs only (database is external PostgreSQL)
+      - ./src/wallets.json:/app/src/wallets.json  # Persist wallet list
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]

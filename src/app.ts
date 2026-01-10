@@ -13,6 +13,7 @@ import { webhookRoutes } from "./routes/webhook.js";
 import { configRoutes } from "./routes/config.js";
 import { healthRoutes } from "./routes/health.js";
 import { authRoutes } from "./routes/auth.js";
+import { walletsRoutes } from "./routes/wallets.js";
 
 // Validate environment variables
 const env = validateEnv();
@@ -61,11 +62,15 @@ app.use('/config', express.json());
 // JSON parsing for auth routes
 app.use('/api/auth', express.json());
 
+// JSON parsing for wallets routes
+app.use('/api/wallets', express.json());
+
 // Routes
 app.use(healthRoutes);
 app.use('/config', jwtAuth, configRoutes);  // Protected: requires JWT
 app.use(webhookRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/wallets', walletsRoutes);  // Protected: requires JWT
 
 // Development endpoints (if enabled) - Protected with JWT
 if (env.ALLOW_DEV_ENDPOINTS) {

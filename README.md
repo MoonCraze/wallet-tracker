@@ -2,6 +2,19 @@
 
 A production-ready, real-time Solana wallet tracking and coordinated trade detection system built with Node.js, TypeScript, and PostgreSQL with TimescaleDB extensions.
 
+> **✨ Recently Enhanced:** Now includes comprehensive wallet management API with automatic Helius webhook synchronization, web-based management interface, and cloud-first architecture with intelligent fallback.
+
+## 🚀 What's New
+
+- **Wallet Management API** - RESTful endpoints for programmatic wallet control
+- **Web-based UI** - Intuitive interface at `/wallets.html` for managing tracked wallets
+- **Automatic Webhook Sync** - Updates Helius webhooks instantly when wallets change
+- **100 Wallet Limit** - Automatic enforcement with clear warnings and excess removal
+- **Cloud Integration** - Fetches from cloud API with local file fallback
+- **Persistent Storage** - Volume-mounted data survives container restarts
+- **Real-time Validation** - Solana address format checking and duplicate removal
+- **Complete Documentation** - Frontend-ready API docs with code examples
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -36,30 +49,46 @@ A sophisticated real-time monitoring system for Solana blockchain that tracks wh
 **Real-time Monitoring**
 - Tracks whale wallet transactions as they occur on Solana blockchain
 - Processes high-volume transaction data with minimal latency
-- Automated daily updates of tracked wallet list
+- Automated daily updates of tracked wallet list with cloud API integration
+- Intelligent fallback to local cache when cloud API is unavailable
 
 **Coordinated Trade Detection**
 - Identifies when multiple wallets buy the same token simultaneously
 - Configurable detection windows and wallet count thresholds
 - Instant alerts through live streaming API
 
+**Wallet Management (NEW ✨)**
+- **Web-based UI** for managing tracked wallet addresses
+- **RESTful API endpoints** for programmatic wallet updates
+- **Automatic Helius webhook synchronization** when wallets change
+- **100 wallet limit enforcement** with automatic excess removal
+- **Real-time validation** of Solana addresses
+- **Duplicate detection** and automatic cleanup
+- **Cloud-first architecture** with local file fallback
+- **Persistent storage** via Docker volume mounts
+
 **API & Integration**
 - RESTful API for configuration and data access
 - Real-time Server-Sent Events (SSE) for live updates
 - JWT-based authentication for secure access
 - CORS support for web applications
+- Comprehensive wallet management endpoints (GET, PUT, POST add/remove)
 
 **System Management**
 - Runtime configuration without restarts
 - Token filtering and amount thresholds
 - Comprehensive health monitoring
 - Structured logging for troubleshooting
+- Automatic webhook updates on wallet changes
+- Daily scheduled wallet synchronization
 
 **Enterprise Ready**
 - Docker containerization for easy deployment
 - PostgreSQL with TimescaleDB for scalable storage
 - Production-tested error handling
 - Secure authentication and authorization
+- Volume-mounted data persistence
+- Automatic service restart on failure
 
 ## System Architecture
 
@@ -224,7 +253,9 @@ docker-compose down
 
 ## API Documentation
 
-Comprehensive API documentation for frontend developers is available in [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
+Comprehensive API documentation for frontend developers is available:
+- **[API_DOCUMENTATION.md](API_DOCUMENTATION.md)** - Complete REST API and streaming reference
+- **[public/docs/WALLET_API.md](public/docs/WALLET_API.md)** - Wallet management API for frontend developers
 
 The documentation includes:
 - Complete endpoint reference with request/response examples
@@ -232,8 +263,104 @@ The documentation includes:
 - Real-time streaming (SSE) usage
 - Database schema documentation
 - Configuration management
+- **Wallet management endpoints with code examples**
 - Error handling patterns
-- Production-ready code examples
+- Production-ready JavaScript classes
+- 100 wallet limit enforcement details
+
+### Quick Reference: Wallet Management API
+
+**Authentication Required** - All wallet endpoints require JWT authentication:
+
+```bash
+# Login to get token
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"your-password"}'
+# Returns: {"token": "eyJhbGc..."}
+```
+
+**Get Wallet List**
+```bash
+# Get current wallet list (includes source: cloud-api or local-file)
+curl -H "Authorization: Bearer <token>" \
+  http://localhost:8080/api/wallets
+
+# Response:
+# {
+#   "success": true,
+#   "count": 100,
+#   "source": "local-file",
+#   "wallets": ["7xKXtg2C...", "9vMJfxuK..."]
+# }
+```
+
+**Update Wallet List** (Replace entire list - max 100 wallets)
+```bash
+curl -X PUT -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"wallets": ["wallet1...", "wallet2..."]}' \
+  http://localhost:8080/api/wallets
+
+# Automatically:
+# ✅ Updates wallets.json
+# ✅ Triggers Helius webhook sync
+# ✅ Enforces 100 wallet limit
+# ✅ Removes duplicates
+```
+
+**Add Wallets** (Add to existing list)
+```bash
+curl -X POST -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"wallets": ["newWallet1...", "newWallet2..."]}' \
+  http://localhost:8080/api/wallets/add
+
+# Response includes:
+# {
+#   "success": true,
+#   "added": 2,
+#   "totalCount": 95
+# }
+```
+
+**Remove Wallets**
+```bash
+curl -X POST -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"wallets": ["walletToRemove1...", "walletToRemove2..."]}' \
+  http://localhost:8080/api/wallets/remove
+
+# Response includes:
+# {
+#   "success": true,
+#   "removed": 2,
+#   "totalCount": 93
+# }
+```
+
+**Web Interface**
+
+Access the web-based wallet management interface at: `http://localhost:8080/wallets.html`
+
+Features:
+- ✅ View all tracked wallets in an intuitive editor
+- ✅ Add/remove/edit wallet addresses (one per line)
+- ✅ Sort alphabetically and remove duplicates
+- ✅ Real-time Solana address validation
+- ✅ 100 wallet limit warnings
+- ✅ Automatic webhook sync after updates
+- ✅ Save with confirmation and error handling
+
+**Automatic Webhook Updates**
+
+When you update wallets via the API or web interface:
+1. Wallets.json file is updated immediately
+2. System triggers immediate webhook sync
+3. Helius webhook is automatically updated with new addresses
+4. New wallets start being monitored within seconds
+5. All changes are logged for debugging
+
 
 ## Configuration
 
@@ -246,6 +373,15 @@ The documentation includes:
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@localhost:5432/db` |
 | `DIRECT_URL` | Direct connection for migrations | `postgresql://user:pass@localhost:5432/db` |
 | `WEBHOOK_SECRET` | Helius webhook authentication | `your-webhook-secret-key` |
+| `HELIUS_API_KEY` | Helius API key for webhook management | `your-helius-api-key` |
+| `WEBHOOK_URL` | Your webhook endpoint URL | `https://your-domain.com/helius` |
+
+#### Optional - Wallet Management
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `WALLETS_API_ENDPOINT` | Cloud API for wallet list | `` (uses local file only) |
+| `WEBHOOK_ID` | Existing Helius webhook ID | `` (auto-detects by URL) |
 
 #### Authentication
 
@@ -524,15 +660,35 @@ View demo pages:
 helius-wallet-tracker/
 ├── src/                         # Application source code
 │   ├── controllers/             # Request handlers
+│   │   ├── auth.ts              # Authentication controller
+│   │   ├── config.ts            # Configuration management
+│   │   ├── wallets.ts           # Wallet management (NEW)
+│   │   └── webhook.ts           # Helius webhook processor
 │   ├── services/                # Business logic
+│   │   ├── coordinator.ts       # Coordinated trade detection
+│   │   ├── walletSync.ts        # Auto wallet sync & webhook updates (ENHANCED)
+│   │   └── webhook.ts           # Webhook event processing
 │   ├── routes/                  # API endpoints
+│   │   ├── auth.ts              # Authentication routes
+│   │   ├── config.ts            # Config routes
+│   │   ├── wallets.ts           # Wallet management routes (NEW)
+│   │   └── webhook.ts           # Webhook routes
 │   ├── middleware/              # Auth & validation
-│   └── utils/                   # Helper functions
+│   │   ├── auth.ts              # Basic auth
+│   │   ├── jwtAuth.ts           # JWT authentication
+│   │   └── error.ts             # Error handling
+│   ├── utils/                   # Helper functions
+│   └── wallets.json             # Tracked wallet addresses (volume-mounted)
 ├── prisma/                      # Database schema & migrations
-├── docs/                        # Documentation
-├── public/                      # Demo web pages
-├── docker-compose.yml           # Docker configuration
-└── API_DOCUMENTATION.md         # Complete API reference
+├── public/                      # Web interfaces
+│   ├── index.html               # Dashboard
+│   ├── login.html               # Login page
+│   ├── wallets.html             # Wallet management UI (NEW)
+│   └── docs/
+│       └── WALLET_API.md        # Wallet API documentation (NEW)
+├── docker-compose.yml           # Docker configuration (with volume mounts)
+├── API_DOCUMENTATION.md         # Complete API reference
+└── README.md                    # This file
 ```
 
 ### Common Commands
@@ -543,7 +699,9 @@ helius-wallet-tracker/
 | `npm run build` | Build for production |
 | `npm run start` | Run production build |
 | `npm run db:studio` | Open database management UI |
-| `npm run wallets:sync` | Update tracked wallet list |
+| `npm run db:migrate` | Apply database migrations |
+| `npm run wallets:sync` | Manually sync wallet list from cloud API |
+| `npm run webhook:update` | Manually update Helius webhook (dev only) |
 
 ### Development Workflow
 
@@ -569,14 +727,33 @@ npm run dev
 
 **Making Changes:**
 1. Edit files in `src/` directory
-2. Server automatically reloads
+2. Server automatically reloads on changes
 3. Test using demo pages at `http://localhost:8080`
-4. Check logs for any errors
+4. Test wallet management at `http://localhost:8080/wallets.html`
+5. Check logs for any errors
 
 **Updating Configuration:**
-- Runtime settings: Use `/config` API endpoint
+- Runtime settings: Use `/api/config` endpoint
+- Wallet addresses: Use `/api/wallets` endpoint or web UI
 - Environment variables: Edit `.env` file and restart
 - Database schema: Update `prisma/schema.prisma` and run migrations
+
+**Testing Wallet Management:**
+```bash
+# Login and get token
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin@123"}' | jq -r '.token')
+
+# Get current wallets
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/wallets
+
+# Update wallets (triggers automatic webhook sync)
+curl -X PUT -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"wallets":["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"]}' \
+  http://localhost:8080/api/wallets
+```
 
 ## Technology Stack
 
@@ -617,11 +794,73 @@ Please include:
 
 ## Documentation
 
-- [API Documentation](API_DOCUMENTATION.md) - Complete REST API and SSE reference
-- [Database Migration Guide](docs/DATABASE_MIGRATION_GUIDE.md) - SQLite to PostgreSQL migration
-- [Wallet Sync Documentation](docs/WALLET_SYNC.md) - Automated wallet management
-- [System Overview](docs/SYSTEM_OVERVIEW.md) - Architecture and design decisions
-- [Docker Guide](DOCKER.md) - Container deployment details
+- **[API_DOCUMENTATION.md](API_DOCUMENTATION.md)** - Complete REST API and SSE reference
+- **[public/docs/WALLET_API.md](public/docs/WALLET_API.md)** - Wallet management API for frontend developers
+- **[Database Migration Guide](docs/DATABASE_MIGRATION_GUIDE.md)** - SQLite to PostgreSQL migration
+- **[Wallet Sync Documentation](docs/WALLET_SYNC.md)** - Automated wallet management
+- **[System Overview](docs/SYSTEM_OVERVIEW.md)** - Architecture and design decisions
+- **[Docker Guide](DOCKER.md)** - Container deployment details
+
+## Key Optimizations & Features
+
+### ✅ Optimized Architecture
+
+1. **Automatic Webhook Synchronization**
+   - Wallet updates trigger immediate Helius webhook sync
+   - No manual webhook management required
+   - Updates complete in seconds
+
+2. **Cloud-First with Local Fallback**
+   - Fetches wallet list from cloud API first
+   - Automatically falls back to local cache on failure
+   - High availability even when external services are down
+
+3. **Persistent Data Storage**
+   - Docker volume mounts for wallets.json
+   - Updates persist across container restarts
+   - No data loss during redeployments
+
+4. **100 Wallet Limit Enforcement**
+   - Automatic validation and enforcement
+   - Clear warnings when limit exceeded
+   - Excess wallets automatically removed
+
+5. **Real-time Validation**
+   - Solana address format validation
+   - Automatic duplicate detection and removal
+   - Invalid addresses rejected immediately
+
+6. **Production-Ready Error Handling**
+   - Graceful fallback strategies
+   - Comprehensive logging
+   - Clear error messages for debugging
+
+### 🎯 Performance Optimizations
+
+- **Async webhook updates** - Non-blocking operations
+- **Efficient data structures** - Set-based deduplication
+- **TimescaleDB integration** - Optimized time-series queries
+- **Connection pooling** - Efficient database access
+- **Docker layer caching** - Fast rebuild times
+- **Volume mounts** - No rebuild needed for data changes
+
+### 🔒 Security Enhancements
+
+- **JWT authentication** on all sensitive endpoints
+- **24-hour token expiration**
+- **Role-based access control**
+- **Webhook secret verification**
+- **Input validation** on all API endpoints
+- **SQL injection prevention** via Prisma ORM
+
+### 📊 Monitoring & Observability
+
+- **Structured logging** with context
+- **Health check endpoint**
+- **Real-time event streaming**
+- **Webhook sync confirmation logs**
+- **Error tracking with stack traces**
+- **Docker health checks**
 
 ## License
 
