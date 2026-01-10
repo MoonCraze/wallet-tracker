@@ -388,9 +388,14 @@
         let trades = [];
         let isConnected = false;
 
+        // Detect correct API URL for Live Server
+        const DEFAULT_API_BASE = (window.location.port === '5500' || window.location.port === '3000') 
+            ? 'http://localhost:8080' 
+            : window.location.origin;
+
         function getApiUrl() {
             let url = document.getElementById('apiUrl').value.trim();
-            if (!url) url = 'https://helius.wonderswhisper.com';
+            if (!url) url = DEFAULT_API_BASE;
             if (!url.endsWith('/')) url += '/';
             return url;
         }
@@ -548,8 +553,7 @@
             }
 
             try {
-                const apiUrl = document.getElementById('apiUrl').value.trim() || window.location.origin;
-                const response = await fetch(`${apiUrl}/api/auth/me`, {
+                const response = await fetch(`${getApiUrl()}/api/auth/me`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
 
@@ -571,9 +575,19 @@
         }
 
         // Initialize on page load
-        window.addEventListener('load', () => {
+        window.addEventListener('load', async () => {
             console.log('🚀 Live Coordinated Trades Monitor initialized');
-            checkAuthStatus();
+            
+            // Set default API URL if empty
+            const apiUrlInput = document.getElementById('apiUrl');
+            if (apiUrlInput && !apiUrlInput.value) {
+                apiUrlInput.value = DEFAULT_API_BASE;
+            }
+            
+            const token = await checkAuthStatus();
+            if (!token) {
+                console.warn('Not authenticated - viewing in public mode');
+            }
             renderTrades();
             updateTradesCount();
         });

@@ -183,6 +183,11 @@
     </div>
 
     <script>
+        // Detect correct API URL for Live Server
+        const API_BASE = (window.location.port === '5500' || window.location.port === '3000') 
+            ? 'http://localhost:8080' 
+            : window.location.origin;
+
         async function checkAuthStatus() {
             const token = localStorage.getItem('jwt_token');
             const authStatus = document.getElementById('authStatus');
@@ -194,7 +199,7 @@
             }
 
             try {
-                const response = await fetch(`${window.location.origin}/api/auth/me`, {
+                const response = await fetch(`${API_BASE}/api/auth/me`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
 

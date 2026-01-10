@@ -404,8 +404,33 @@
         let allEventSource = null;
         let streamOutput = document.getElementById('streamOutput');
 
+        // Detect correct API URL for Live Server
+        const DEFAULT_API_BASE = (window.location.port === '5500' || window.location.port === '3000') 
+            ? 'http://localhost:8080' 
+            : window.location.origin;
+
         function getBaseUrl() {
-            return document.getElementById('baseUrl').value.replace(/\/$/, '');
+            const url = document.getElementById('baseUrl').value.trim();
+            return url || DEFAULT_API_BASE;
+        }
+
+        function getAuthHeaders() {
+            const token = localStorage.getItem('jwt_token');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            return headers;
+        }
+
+        function requireAuth() {
+            const token = localStorage.getItem('jwt_token');
+            if (!token) {
+                alert('Authentication required. Redirecting to login...');
+                window.location.href = 'login.html';
+                return false;
+            }
+            return true;
         }
 
         function updateApiResponse(content, isError = false) {
@@ -510,9 +535,7 @@
 
                 const response = await fetch(`${getBaseUrl()}/config/exclude-tokens`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({ tokenAddress })
                 });
 
@@ -538,7 +561,8 @@
                 }
 
                 const response = await fetch(`${getBaseUrl()}/config/exclude-tokens/${encodeURIComponent(tokenAddress)}`, {
-                    method: 'DELETE'
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
                 });
 
                 const data = await response.json();
@@ -617,9 +641,7 @@
                 
                 const response = await fetch(`${getBaseUrl()}/config`, {
                     method: 'PATCH',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify(payload)
                 });
 
@@ -653,12 +675,17 @@
                     return;
                 }
 
+                const token = localStorage.getItem('jwt_token');
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'x-helius-secret': secret
+                };
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
                 const response = await fetch(`${getBaseUrl()}/helius`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-helius-secret': secret
-                    },
+                    headers: headers,
                     body: JSON.stringify(parsedPayload)
                 });
 
@@ -834,9 +861,19 @@
             }
         }
 
-        // Test health endpoint on load
-        window.addEventListener('load', function() {
-            checkAuthStatus();
+        // Initialize and check auth on load
+        window.addEventListener('load', async function() {
+            // Set default base URL if empty
+            const baseUrlInput = document.getElementById('baseUrl');
+            if (!baseUrlInput.value) {
+                baseUrlInput.value = DEFAULT_API_BASE;
+            }
+            
+            const isAuthenticated = await checkAuthStatus();
+            if (!isAuthenticated) {
+                // Allow viewing but show warning for protected operations
+                console.warn('Not authenticated - some operations may fail');
+            }
             setTimeout(testHealth, 1000);
         });
     </script>
