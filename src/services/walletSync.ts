@@ -25,6 +25,7 @@ interface WalletData {
 }
 
 export class WalletSyncService {
+  private static instance: WalletSyncService | null = null;
   private apiEndpoint: string;
   private walletsFilePath: string;
   private isRunning: boolean = false;
@@ -33,6 +34,14 @@ export class WalletSyncService {
   constructor(apiEndpoint?: string) {
     this.apiEndpoint = apiEndpoint || process.env.WALLETS_API_ENDPOINT || "";
     this.walletsFilePath = join(__dirname, "..", "wallets.json");
+    WalletSyncService.instance = this;
+  }
+
+  /**
+   * Get singleton instance
+   */
+  static getInstance(): WalletSyncService | null {
+    return WalletSyncService.instance;
   }
 
   /**
@@ -128,6 +137,81 @@ export class WalletSyncService {
   }
 
   /**
+   * Update Helius webhook with current wallet addresses
+   */
+  async updateHeliusWebhook(walletAddresses: string[]): Promise<boolean> {
+    const apiKey = process.env.HELIUS_API_KEY;
+    const webhookId = process.env.WEBHOOK_ID;
+    const webhookUrl = process.env.WEBHOOK_URL;
+    const webhookSecret = process.env.WEBHOOK_SECRET || "super-secret";
+
+    if (!apiKey || !webhookUrl) {
+      Logger.warn("Helius webhook update skipped: Missing HELIUS_API_KEY or WEBHOOK_URL");
+      return false;
+    }
+
+    try {
+      if (webhookId) {
+        // Update existing webhook by ID
+        const url = `https://api.helius.xyz/v0/webhooks/${webhookId}?api-key=${apiKey}`;
+        const { data } = await axios.put(url, {
+          webhookURL: webhookUrl,
+          transactionTypes: ["ANY"],
+          accountAddresses: walletAddresses,
+          webhookType: "enhanced",
+          authHeader: `Authorization: Bearer ${webhookSecret}`,
+        });
+        Logger.info(`Updated Helius webhook ${webhookId} with ${walletAddresses.length} addresses`);
+        return true;
+      } else {
+        // Find and update existing webhook by URL, or create new one
+        const listUrl = `https://api.helius.xyz/v0/webhooks?api-key=${apiKey}`;
+        const { data: webhooks } = await axios.get(listUrl);
+        
+        const existing = Array.isArray(webhooks) 
+          ? webhooks.find((w: any) => w.webhookURL === webhookUrl)
+          : null;
+
+        if (existing) {
+          const existingId = existing.id || existing.webhookID || existing.webhookId;
+          const url = `https://api.helius.xyz/v0/webhooks/${existingId}?api-key=${apiKey}`;
+          const { data } = await axios.put(url, {
+            webhookURL: webhookUrl,
+            transactionTypes: ["ANY"],
+            accountAddresses: walletAddresses,
+            webhookType: "enhanced",
+            authHeader: `Authorization: Bearer ${webhookSecret}`,
+          });
+          Logger.info(`Updated existing Helius webhook (${existingId}) with ${walletAddresses.length} addresses`);
+          return true;
+        } else {
+          // Create new webhook
+          const { data } = await axios.post(listUrl, {
+            webhookURL: webhookUrl,
+            transactionTypes: ["ANY"],
+            accountAddresses: walletAddresses,
+            webhookType: "enhanced",
+            authHeader: `Authorization: Bearer ${webhookSecret}`,
+          });
+          const newId = data.id || data.webhookID || data.webhookId;
+          Logger.info(`Created new Helius webhook (${newId}) with ${walletAddresses.length} addresses`);
+          return true;
+        }
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        Logger.error("Failed to update Helius webhook", {
+          status: error.response?.status,
+          error: error.response?.data?.error || error.message,
+        });
+      } else {
+        Logger.error("Unexpected error updating Helius webhook", { error });
+      }
+      return false;
+    }
+  }
+
+  /**
    * Perform the sync operation
    */
   async syncWallets(): Promise<void> {
@@ -136,6 +220,8 @@ export class WalletSyncService {
       const existingWallets = await this.readExistingWallets();
       if (existingWallets.length > 0) {
         Logger.info(`Using ${existingWallets.length} wallets from saved file`);
+        // Still update webhook with existing wallets
+        await this.updateHeliusWebhook(existingWallets);
       }
       return;
     }
@@ -146,12 +232,14 @@ export class WalletSyncService {
       
       if (wallets.length > 0) {
         await this.updateWalletsFile(wallets);
+        await this.updateHeliusWebhook(wallets);
         Logger.info("Wallet sync completed successfully");
       } else {
         Logger.warn("No wallets fetched from API");
         const existingWallets = await this.readExistingWallets();
         if (existingWallets.length > 0) {
           Logger.info(`Falling back to ${existingWallets.length} wallets from saved file`);
+          await this.updateHeliusWebhook(existingWallets);
         } else {
           Logger.error("No wallets available - API failed and no saved wallets found");
         }
@@ -161,6 +249,7 @@ export class WalletSyncService {
       const existingWallets = await this.readExistingWallets();
       if (existingWallets.length > 0) {
         Logger.info(`Falling back to ${existingWallets.length} wallets from saved file`);
+        await this.updateHeliusWebhook(existingWallets);
       } else {
         Logger.error("No wallets available - API failed and no saved wallets found");
       }
@@ -245,5 +334,13 @@ export class WalletSyncService {
       apiEndpoint: this.apiEndpoint,
       walletsFilePath: this.walletsFilePath,
     };
+  }
+
+  /**
+   * Force an immediate sync (useful after manual wallet list updates)
+   */
+  async syncNow(): Promise<void> {
+    Logger.info("Performing immediate wallet sync...");
+    await this.syncWallets();
   }
 }
