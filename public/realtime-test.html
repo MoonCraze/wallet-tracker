@@ -68,6 +68,8 @@
         </div>
       </div>
       <div class="toolbar">
+        <span id="authStatus" class="chip" style="background:var(--surface); border-color:var(--border)">🔓 Public</span>
+        <a href="login.html" style="color:var(--text); text-decoration:none; background:var(--chip); padding:8px 12px; border-radius:8px; border:1px solid var(--border); font-size:12px">Login</a>
         <button id="connect" title="Open SSE connection">Connect</button>
   <button id="disconnect" title="Close SSE connection">Disconnect</button>
         <button id="refreshCfg" title="Fetch current server config">Refresh Config</button>
@@ -536,9 +538,43 @@
         log('Coordinated table cleared', 'warn');
       });
 
+      // Check authentication status
+      async function checkAuthStatus() {
+        const token = localStorage.getItem('jwt_token');
+        const authStatus = document.getElementById('authStatus');
+        
+        if (!token) {
+          authStatus.textContent = '🔓 Public';
+          return null;
+        }
+
+        try {
+          const response = await fetch(`${getBaseUrl()}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            authStatus.textContent = `🔐 ${data.username}`;
+            authStatus.style.background = 'var(--ok)';
+            authStatus.style.color = 'var(--bg)';
+            return token;
+          } else {
+            localStorage.removeItem('jwt_token');
+            authStatus.textContent = '🔓 Public';
+            return null;
+          }
+        } catch (error) {
+          console.error('Auth check failed:', error);
+          authStatus.textContent = '🔓 Public';
+          return null;
+        }
+      }
+
       // Initial actions
   initBaseUrl();
   loadFilters();
+  checkAuthStatus();
   fetchConfig();
   connectSSE();
   applyFilters();

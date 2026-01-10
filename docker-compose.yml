@@ -6,7 +6,9 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=8080
-      - DATABASE_URL=file:/app/data/production.db
+      # PostgreSQL connection (use your external database URL)
+      - DATABASE_URL=${DATABASE_URL}
+      - DIRECT_URL=${DIRECT_URL:-${DATABASE_URL}}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-super-secret-change-me}
       - HELIUS_API_KEY=${HELIUS_API_KEY}
       - WEBHOOK_URL=${WEBHOOK_URL}
@@ -20,9 +22,12 @@ services:
       - ALLOW_DEV_ENDPOINTS=${ALLOW_DEV_ENDPOINTS:-0}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
       - WALLETS_API_ENDPOINT=${WALLETS_API_ENDPOINT}
+      # Authentication
+      - JWT_SECRET=${JWT_SECRET:-change-this-in-production}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin@123}
     volumes:
-      - helius_data:/app/data  # Persist SQLite database
-      - helius_logs:/app/logs  # Persist logs
+      - helius_logs:/app/logs  # Persist logs only (database is external PostgreSQL)
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
@@ -31,21 +36,6 @@ services:
       retries: 3
       start_period: 40s
 
-  prisma-studio:
-    build: .
-    ports:
-      - "5555:5555"
-    environment:
-      - DATABASE_URL=file:/app/data/production.db
-    volumes:
-      - helius_data:/app/data
-    command: npx prisma studio --hostname 0.0.0.0 --port 5555
-    depends_on:
-      - helius-tracker
-    restart: unless-stopped
-
 volumes:
-  helius_data:
-    driver: local
   helius_logs:
     driver: local

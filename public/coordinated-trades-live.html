@@ -342,6 +342,12 @@
         <div class="header">
             <h1>🚨 Live Coordinated Trades Monitor</h1>
             <p>Real-time detection of coordinated trading activity across multiple wallets</p>
+            <div style="margin-top: 12px; display: flex; gap: 10px; justify-content: center; font-size: 0.9rem;">
+                <span id="authStatus" style="background: rgba(255,255,255,0.15); padding: 6px 12px; border-radius: 6px;">🔓 Public Access</span>
+                <a href="login.html" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 6px;">Login</a>
+                <a href="test.html" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 6px;">Test API</a>
+                <a href="realtime-test.html" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 6px;">Console</a>
+            </div>
         </div>
 
         <div class="controls">
@@ -531,9 +537,43 @@
             console.log('🗑️ Cleared all trades from display');
         }
 
+        // Check authentication status
+        async function checkAuthStatus() {
+            const token = localStorage.getItem('jwt_token');
+            const authStatus = document.getElementById('authStatus');
+            
+            if (!token) {
+                authStatus.textContent = '🔓 Public Access';
+                return null;
+            }
+
+            try {
+                const apiUrl = document.getElementById('apiUrl').value.trim() || window.location.origin;
+                const response = await fetch(`${apiUrl}/api/auth/me`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    authStatus.textContent = `🔐 ${data.username}`;
+                    authStatus.style.background = 'rgba(52, 211, 153, 0.3)';
+                    return token;
+                } else {
+                    localStorage.removeItem('jwt_token');
+                    authStatus.textContent = '🔓 Public Access';
+                    return null;
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                authStatus.textContent = '🔓 Public Access';
+                return null;
+            }
+        }
+
         // Initialize on page load
         window.addEventListener('load', () => {
             console.log('🚀 Live Coordinated Trades Monitor initialized');
+            checkAuthStatus();
             renderTrades();
             updateTradesCount();
         });

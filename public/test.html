@@ -246,6 +246,12 @@
         <div class="header">
             <h1>🐋 Helius Wallet Tracker</h1>
             <p>Comprehensive endpoint testing interface</p>
+            <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center; align-items: center;">
+                <span id="authStatus" style="font-size: 0.9rem;">🔓 Public Access</span>
+                <a href="login.html" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 6px; font-size: 0.85rem;">Login</a>
+                <a href="realtime-test.html" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 6px; font-size: 0.85rem;">Realtime</a>
+                <a href="coordinated-trades-live.html" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 6px; font-size: 0.85rem;">Live Monitor</a>
+            </div>
         </div>
 
         <div class="main-content">
@@ -797,8 +803,40 @@
         document.getElementById('coordinatedStatus').className = 'status-indicator status-disconnected';
         document.getElementById('allStatus').className = 'status-indicator status-disconnected';
 
+        // Check authentication status
+        async function checkAuthStatus() {
+            const token = localStorage.getItem('jwt_token');
+            const authStatus = document.getElementById('authStatus');
+            
+            if (!token) {
+                authStatus.textContent = '🔓 Public Access';
+                return null;
+            }
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/auth/me`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    authStatus.textContent = `🔐 Logged in as ${data.username}`;
+                    return token;
+                } else {
+                    localStorage.removeItem('jwt_token');
+                    authStatus.textContent = '🔓 Public Access';
+                    return null;
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                authStatus.textContent = '🔓 Public Access';
+                return null;
+            }
+        }
+
         // Test health endpoint on load
         window.addEventListener('load', function() {
+            checkAuthStatus();
             setTimeout(testHealth, 1000);
         });
     </script>
