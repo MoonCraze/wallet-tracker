@@ -36,6 +36,18 @@ services:
       retries: 3
       start_period: 40s
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./Cloudfare/cloudflared-config.yml:/etc/cloudflared/config.yml:ro
+      - ./Cloudfare/c8e67b13-2249-4281-8170-7744ff8fdfa2.json:/etc/cloudflared/credentials.json:ro
+    restart: unless-stopped
+    depends_on:
+      - helius-tracker
+    networks:
+      - default
+
 volumes:
   helius_logs:
     driver: local
