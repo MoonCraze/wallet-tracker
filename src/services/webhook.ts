@@ -198,6 +198,16 @@ export class WebhookService {
   ): Promise<void> {
     const config = getConfig();
     
+    // Check broadcast cache first to prevent redundant processing
+    const broadcastKey = `${tokenAddress}|${windowStart.toISOString()}`;
+    const now = Date.now();
+    const lastBroadcast = recentlyBroadcastCoordinated.get(broadcastKey);
+    
+    if (lastBroadcast && (now - lastBroadcast) < BROADCAST_CACHE_TTL) {
+      Logger.debug("Recently processed in cache", { tokenAddress, windowStart });
+      return;
+    }
+    
     const existing = await prisma.coordinatedTrade.findFirst({
       where: { tokenAddress, windowStart },
       select: { id: true }
@@ -222,8 +232,16 @@ export class WebhookService {
     
     if (uniqueWallets.length >= config.coordinatedMinWallets) {
       try {
-        const coordinatedTrade = await prisma.coordinatedTrade.create({
-          data: {
+        // Use upsert to handle race conditions
+        const coordinatedTrade = await prisma.coordinatedTrade.upsert({
+          where: {
+            token_window_unique: {
+              tokenAddress,
+              windowStart
+            }
+          },
+          update: {},
+          create: {
             tokenAddress,
             windowStart,
             windowEnd,
@@ -233,36 +251,25 @@ export class WebhookService {
           },
         });
 
-        const broadcastKey = `${tokenAddress}|${windowStart.toISOString()}`;
-        const now = Date.now();
-        const lastBroadcast = recentlyBroadcastCoordinated.get(broadcastKey);
+        // Set broadcast cache and publish only once
+        recentlyBroadcastCoordinated.set(broadcastKey, now);
         
-        if (!lastBroadcast || (now - lastBroadcast) >= BROADCAST_CACHE_TTL) {
-          recentlyBroadcastCoordinated.set(broadcastKey, now);
-          
-          publishCoordinated({
-            tokenAddress,
-            windowStart: windowStart.toISOString(),
-            windowEnd: windowEnd.toISOString(),
-            triggeredAt: triggeredAt.toISOString(),
-            uniqueWalletCount: coordinatedTrade.uniqueWalletCount,
-            walletAddresses: uniqueWallets,
-          });
+        publishCoordinated({
+          tokenAddress,
+          windowStart: windowStart.toISOString(),
+          windowEnd: windowEnd.toISOString(),
+          triggeredAt: triggeredAt.toISOString(),
+          uniqueWalletCount: coordinatedTrade.uniqueWalletCount,
+          walletAddresses: uniqueWallets,
+        });
 
-          Logger.info("Detected coordinated trade", {
-            tokenAddress,
-            windowStart: windowStart.toISOString(),
-            uniqueWalletCount: uniqueWallets.length
-          });
-        } else {
-          Logger.debug("Skipped duplicate broadcast", { tokenAddress, windowStart });
-        }
+        Logger.info("Detected coordinated trade", {
+          tokenAddress,
+          windowStart: windowStart.toISOString(),
+          uniqueWalletCount: uniqueWallets.length
+        });
       } catch (error) {
-        if ((error as any).code === 'P2002') {
-          Logger.debug("Already created by another process", { tokenAddress });
-        } else {
-          Logger.warn("Failed to create coordinated trade", { tokenAddress, error });
-        }
+        Logger.debug("Race condition - already created", { tokenAddress, error: (error as any).message });
       }
     }
   }
