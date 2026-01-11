@@ -116,13 +116,14 @@ function safeWrite(res: Response, chunk: string): boolean {
 export function publishTransfers(rows: TransferBroadcast[]) {
   if (rows.length === 0) return;
   
-  // De-duplicate rows based on signature only for realtime streaming
+  // Deduplicate within batch using composite key
   const unique: TransferBroadcast[] = [];
   const seen = new Set<string>();
   
   for (const row of rows) {
-    if (!seen.has(row.signature)) {
-      seen.add(row.signature);
+    const key = `${row.walletAddress}|${row.tokenAddress}|${row.signature}`;
+    if (!seen.has(key)) {
+      seen.add(key);
       unique.push(row);
     }
   }

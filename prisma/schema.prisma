@@ -13,10 +13,13 @@ model TransferEvent {
   walletAddress String
   tokenAddress  String
   amount        String   // store as string to avoid FP precision issues
-  signature     String
+  signature     String   // Solana transaction signature
   timestamp     DateTime
   side          String   // "BUY" | "SELL"
 
+  // Composite unique constraint: A single transaction (signature) can contain
+  // multiple token transfers. Each (wallet, token, signature) is unique.
+  // Example: Wallet selling 10 different tokens = 1 signature, 10 records
   @@unique([walletAddress, tokenAddress, signature], name: "wallet_token_sig_unique")
   @@index([walletAddress, timestamp])
   @@index([tokenAddress, timestamp])

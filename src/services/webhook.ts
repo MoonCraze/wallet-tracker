@@ -6,6 +6,26 @@ import { getConfig } from "../config.js";
 import { publishTransfers, publishCoordinated } from "../realtime.js";
 import { Logger } from "../lib/logger.js";
 
+// Broadcast cache to prevent duplicate SSE events during race conditions
+const recentlyBroadcastTransfers = new Map<string, number>();
+const recentlyBroadcastCoordinated = new Map<string, number>();
+const BROADCAST_CACHE_TTL = 5000; // 5 seconds
+
+// Periodic cleanup of expired cache entries
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamp] of recentlyBroadcastTransfers.entries()) {
+    if (now - timestamp > BROADCAST_CACHE_TTL) {
+      recentlyBroadcastTransfers.delete(key);
+    }
+  }
+  for (const [key, timestamp] of recentlyBroadcastCoordinated.entries()) {
+    if (now - timestamp > BROADCAST_CACHE_TTL) {
+      recentlyBroadcastCoordinated.delete(key);
+    }
+  }
+}, 10000);
+
 export class WebhookService {
   private wallets: Set<string>;
 
@@ -54,7 +74,6 @@ export class WebhookService {
   private async deduplicateAndFilter(transfers: any[]): Promise<any[]> {
     const config = getConfig();
     
-    // Filter by token exclusions and minimum amount
     const filtered = transfers.filter((transfer) => {
       if (config.excludeTokensSet.has(transfer.tokenAddress)) {
         return false;
@@ -63,51 +82,37 @@ export class WebhookService {
       return Number.isFinite(amount) && amount >= config.minAmount;
     });
 
-    // Deduplicate within payload
+    // Deduplicate using composite key: wallet + token + signature
+    // Note: One transaction can contain multiple token transfers
     const uniqueMap = new Map<string, typeof filtered[number]>();
     for (const transfer of filtered) {
-      const key = config.dedupBySignatureOnly 
-        ? transfer.signature 
-        : `${transfer.walletAddress}|${transfer.tokenAddress}|${transfer.signature}`;
+      const key = `${transfer.walletAddress}|${transfer.tokenAddress}|${transfer.signature}`;
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, transfer);
       }
     }
 
     const deduplicated = Array.from(uniqueMap.values());
-
-    // Check existing transfers in database
     if (deduplicated.length === 0) return [];
 
     const existingKeys = await this.getExistingTransferKeys(deduplicated);
     
     return deduplicated.filter((transfer) => {
-      const key = config.dedupBySignatureOnly 
-        ? transfer.signature 
-        : `${transfer.walletAddress}|${transfer.tokenAddress}|${transfer.signature}`;
+      const key = `${transfer.walletAddress}|${transfer.tokenAddress}|${transfer.signature}`;
       return !existingKeys.has(key);
     });
   }
 
   private async getExistingTransferKeys(transfers: any[]): Promise<Set<string>> {
-    const config = getConfig();
-    
     try {
       const signatures = Array.from(new Set(transfers.map(t => t.signature)));
       
-      if (config.dedupBySignatureOnly) {
-        const existing = await prisma.transferEvent.findMany({
-          where: { signature: { in: signatures } },
-          select: { signature: true }
-        });
-        return new Set(existing.map(e => e.signature));
-      } else {
-        const existing = await prisma.transferEvent.findMany({
-          where: { signature: { in: signatures } },
-          select: { walletAddress: true, tokenAddress: true, signature: true }
-        });
-        return new Set(existing.map(e => `${e.walletAddress}|${e.tokenAddress}|${e.signature}`));
-      }
+      const existing = await prisma.transferEvent.findMany({
+        where: { signature: { in: signatures } },
+        select: { walletAddress: true, tokenAddress: true, signature: true }
+      });
+      
+      return new Set(existing.map(e => `${e.walletAddress}|${e.tokenAddress}|${e.signature}`));
     } catch (error) {
       Logger.warn("Failed to check existing transfer keys", { error });
       return new Set();
@@ -127,12 +132,12 @@ export class WebhookService {
           timestamp: new Date(t.timestamp),
           side: t.side,
         })),
+        skipDuplicates: true,
       });
       
-      return (result as any)?.count ?? transfers.length;
+      return result.count;
     } catch (error) {
-      // Fallback to individual upserts if createMany fails
-      Logger.warn("CreateMany failed, falling back to individual upserts", { error });
+      Logger.warn("CreateMany failed, falling back to upserts", { error });
       
       let created = 0;
       for (const transfer of transfers) {
@@ -193,7 +198,6 @@ export class WebhookService {
   ): Promise<void> {
     const config = getConfig();
     
-    // Check if already processed
     const existing = await prisma.coordinatedTrade.findFirst({
       where: { tokenAddress, windowStart },
       select: { id: true }
@@ -204,13 +208,11 @@ export class WebhookService {
       return;
     }
 
-  // Find unique wallets with BUY transactions in the window up to the trigger time (no lookahead)
     const buyers = await prisma.transferEvent.findMany({
       where: { 
         tokenAddress, 
         side: "BUY", 
-    // Count only events that happened so far within this bucket
-    timestamp: { gte: windowStart, lt: triggeredAt } 
+        timestamp: { gte: windowStart, lt: triggeredAt } 
       },
       select: { walletAddress: true },
       distinct: ["walletAddress"]
@@ -231,23 +233,36 @@ export class WebhookService {
           },
         });
 
-        // Broadcast coordinated trade event
-        publishCoordinated({
-          tokenAddress,
-          windowStart: windowStart.toISOString(),
-          windowEnd: windowEnd.toISOString(),
-          triggeredAt: triggeredAt.toISOString(),
-          uniqueWalletCount: coordinatedTrade.uniqueWalletCount,
-          walletAddresses: uniqueWallets,
-        });
+        const broadcastKey = `${tokenAddress}|${windowStart.toISOString()}`;
+        const now = Date.now();
+        const lastBroadcast = recentlyBroadcastCoordinated.get(broadcastKey);
+        
+        if (!lastBroadcast || (now - lastBroadcast) >= BROADCAST_CACHE_TTL) {
+          recentlyBroadcastCoordinated.set(broadcastKey, now);
+          
+          publishCoordinated({
+            tokenAddress,
+            windowStart: windowStart.toISOString(),
+            windowEnd: windowEnd.toISOString(),
+            triggeredAt: triggeredAt.toISOString(),
+            uniqueWalletCount: coordinatedTrade.uniqueWalletCount,
+            walletAddresses: uniqueWallets,
+          });
 
-        Logger.info("Detected coordinated trade", {
-          tokenAddress,
-          windowStart: windowStart.toISOString(),
-          uniqueWalletCount: uniqueWallets.length
-        });
+          Logger.info("Detected coordinated trade", {
+            tokenAddress,
+            windowStart: windowStart.toISOString(),
+            uniqueWalletCount: uniqueWallets.length
+          });
+        } else {
+          Logger.debug("Skipped duplicate broadcast", { tokenAddress, windowStart });
+        }
       } catch (error) {
-        Logger.warn("Failed to create coordinated trade", { tokenAddress, error });
+        if ((error as any).code === 'P2002') {
+          Logger.debug("Already created by another process", { tokenAddress });
+        } else {
+          Logger.warn("Failed to create coordinated trade", { tokenAddress, error });
+        }
       }
     }
   }
@@ -268,17 +283,35 @@ export class WebhookService {
         const saved = await this.saveTransfers(newTransfers);
         totalProcessed += saved;
 
-        // Broadcast new transfers
-        const broadcastData = newTransfers.map(t => ({
-          walletAddress: t.walletAddress,
-          tokenAddress: t.tokenAddress,
-          amount: t.amount,
-          signature: t.signature,
-          timestamp: new Date(t.timestamp).toISOString(),
-          side: t.side as "BUY" | "SELL",
-        }));
-        
-        publishTransfers(broadcastData);
+        const now = Date.now();
+        const toBroadcast = newTransfers.filter(t => {
+          const key = `${t.walletAddress}|${t.tokenAddress}|${t.signature}`;
+          const lastBroadcast = recentlyBroadcastTransfers.get(key);
+          
+          if (lastBroadcast && (now - lastBroadcast) < BROADCAST_CACHE_TTL) {
+            return false;
+          }
+          
+          recentlyBroadcastTransfers.set(key, now);
+          return true;
+        });
+
+        if (toBroadcast.length > 0) {
+          const broadcastData = toBroadcast.map(t => ({
+            walletAddress: t.walletAddress,
+            tokenAddress: t.tokenAddress,
+            amount: t.amount,
+            signature: t.signature,
+            timestamp: new Date(t.timestamp).toISOString(),
+            side: t.side as "BUY" | "SELL",
+          }));
+          
+          publishTransfers(broadcastData);
+          
+          if (toBroadcast.length < newTransfers.length) {
+            Logger.debug(`Skipped ${newTransfers.length - toBroadcast.length} duplicate broadcasts`);
+          }
+        }
 
         // Track tokens with BUY transactions for coordination check
         for (const transfer of newTransfers) {
