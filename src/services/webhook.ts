@@ -6,9 +6,12 @@ import { getConfig } from "../config.js";
 import { publishTransfers, publishCoordinated } from "../realtime.js";
 import { Logger } from "../lib/logger.js";
 
-// Broadcast cache to prevent duplicate SSE events during race conditions
+// Processing locks to prevent race conditions (cache-first pattern)
+const coordinatedProcessingLocks = new Map<string, number>();
+const PROCESSING_LOCK_TTL = 30000; // 30 seconds - covers full processing time
+
+// Broadcast cache for SSE deduplication
 const recentlyBroadcastTransfers = new Map<string, number>();
-const recentlyBroadcastCoordinated = new Map<string, number>();
 const BROADCAST_CACHE_TTL = 5000; // 5 seconds
 
 // Periodic cleanup of expired cache entries
@@ -19,9 +22,9 @@ setInterval(() => {
       recentlyBroadcastTransfers.delete(key);
     }
   }
-  for (const [key, timestamp] of recentlyBroadcastCoordinated.entries()) {
-    if (now - timestamp > BROADCAST_CACHE_TTL) {
-      recentlyBroadcastCoordinated.delete(key);
+  for (const [key, timestamp] of coordinatedProcessingLocks.entries()) {
+    if (now - timestamp > PROCESSING_LOCK_TTL) {
+      coordinatedProcessingLocks.delete(key);
     }
   }
 }, 10000);
@@ -198,23 +201,28 @@ export class WebhookService {
   ): Promise<void> {
     const config = getConfig();
     
-    // Check broadcast cache first to prevent redundant processing
-    const broadcastKey = `${tokenAddress}|${windowStart.toISOString()}`;
+    // CRITICAL: Acquire processing lock FIRST (cache-first pattern)
+    // This must happen before any async operations to prevent race conditions
+    const lockKey = `${tokenAddress}|${windowStart.toISOString()}`;
     const now = Date.now();
-    const lastBroadcast = recentlyBroadcastCoordinated.get(broadcastKey);
+    const existingLock = coordinatedProcessingLocks.get(lockKey);
     
-    if (lastBroadcast && (now - lastBroadcast) < BROADCAST_CACHE_TTL) {
-      Logger.debug("Recently processed in cache", { tokenAddress, windowStart });
+    if (existingLock && (now - existingLock) < PROCESSING_LOCK_TTL) {
+      Logger.debug("Lock already held, skipping", { tokenAddress, windowStart });
       return;
     }
     
+    // Acquire lock immediately before any DB operations
+    coordinatedProcessingLocks.set(lockKey, now);
+    
+    // Now check if already exists in DB (secondary check)
     const existing = await prisma.coordinatedTrade.findFirst({
       where: { tokenAddress, windowStart },
       select: { id: true }
     });
     
     if (existing) {
-      Logger.debug("Token already processed for window", { tokenAddress, windowStart });
+      Logger.debug("Already exists in DB", { tokenAddress, windowStart });
       return;
     }
 
@@ -232,16 +240,9 @@ export class WebhookService {
     
     if (uniqueWallets.length >= config.coordinatedMinWallets) {
       try {
-        // Use upsert to handle race conditions
-        const coordinatedTrade = await prisma.coordinatedTrade.upsert({
-          where: {
-            token_window_unique: {
-              tokenAddress,
-              windowStart
-            }
-          },
-          update: {},
-          create: {
+        // Create the record (we hold the lock, so this should be unique)
+        const coordinatedTrade = await prisma.coordinatedTrade.create({
+          data: {
             tokenAddress,
             windowStart,
             windowEnd,
@@ -251,9 +252,7 @@ export class WebhookService {
           },
         });
 
-        // Set broadcast cache and publish only once
-        recentlyBroadcastCoordinated.set(broadcastKey, now);
-        
+        // Publish to SSE stream
         publishCoordinated({
           tokenAddress,
           windowStart: windowStart.toISOString(),
@@ -269,7 +268,12 @@ export class WebhookService {
           uniqueWalletCount: uniqueWallets.length
         });
       } catch (error) {
-        Logger.debug("Race condition - already created", { tokenAddress, error: (error as any).message });
+        // P2002 = unique constraint violation (another process won the race)
+        if ((error as any).code === 'P2002') {
+          Logger.debug("Lost race condition, record already exists", { tokenAddress });
+        } else {
+          Logger.warn("Failed to create coordinated trade", { tokenAddress, error: (error as any).message });
+        }
       }
     }
   }
