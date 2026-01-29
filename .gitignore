@@ -11,7 +11,7 @@ prisma/dev.db-journal
 src/wallets.json
 logs/events.ndjson
 dist
-docs/
+# docs/
 
 cloudflared-linux-amd64.deb
 
